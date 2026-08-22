@@ -22,45 +22,30 @@ const INITIAL_DATE_RANGE: DateRangeState = {
 };
 
 export default function DashboardPage() {
-  const { session, dbUser, onboardingState, isLoading, isFirstLogin, refreshOnboardingState } = useAuth();
+  const { session, user, dbUser, onboardingState, isLoading, isFirstLogin, updateOnboardingFlag } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [dateRange, setDateRange] = useState<DateRangeState>(INITIAL_DATE_RANGE);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [skipOnboarding, setSkipOnboarding] = useState(false);
 
-  // Auth redirect
+  // Auth redirect if unauthenticated
   useEffect(() => {
     if (!isLoading && !session) {
       window.location.href = '/login';
     }
   }, [isLoading, session]);
 
-  // Determine if we should show onboarding
+  // Determine if we should show onboarding (shown for new users until Gmail is connected or they choose to explore)
   useEffect(() => {
-    if (!isLoading && onboardingState && !skipOnboarding) {
-      const isNewUser = !onboardingState.gmail_connected &&
-        !onboardingState.first_macro_added &&
-        !onboardingState.extension_installed;
-      setShowOnboarding(isNewUser || isFirstLogin);
+    if (!isLoading && !skipOnboarding) {
+      if (!onboardingState) {
+        setShowOnboarding(true);
+      } else {
+        const isConnected = onboardingState.gmail_connected;
+        setShowOnboarding(!isConnected || isFirstLogin);
+      }
     }
   }, [isLoading, onboardingState, isFirstLogin, skipOnboarding]);
-
-  const handleUpdateOnboarding = useCallback(async (updates: Partial<{
-    gmail_connected: boolean;
-    first_macro_added: boolean;
-    extension_installed: boolean;
-    viewed_demo: boolean;
-  }>) => {
-    try {
-      const token = session?.access_token;
-      if (!token) return;
-      const { updateOnboardingState } = await import('@/lib/api');
-      await updateOnboardingState(token, updates);
-      await refreshOnboardingState();
-    } catch (err) {
-      console.error('Failed to update onboarding:', err);
-    }
-  }, [session, refreshOnboardingState]);
 
   const handleAddMacro = () => {
     setActiveTab('macros');
@@ -83,29 +68,42 @@ export default function DashboardPage() {
     );
   }
 
-  // No session — will redirect
+  // No session — will redirect to login
   if (!session) {
     return null;
   }
 
-  // Show onboarding for first-time users
+  // Show onboarding for new users
   if (showOnboarding && !skipOnboarding) {
+    const displayName =
+      dbUser?.full_name ||
+      user?.user_metadata?.full_name ||
+      user?.user_metadata?.name ||
+      dbUser?.email ||
+      user?.email ||
+      'there';
+
     return (
       <OnboardingDashboard
-        userName={dbUser?.full_name || dbUser?.email || 'there'}
-        onboardingState={onboardingState || {
-          gmail_connected: false,
-          first_macro_added: false,
-          extension_installed: false,
-          viewed_demo: false,
+        userName={displayName}
+        onboardingState={
+          onboardingState || {
+            gmail_connected: false,
+            first_macro_added: false,
+            extension_installed: false,
+            viewed_demo: false,
+          }
+        }
+        onUpdateOnboarding={updateOnboardingFlag}
+        onNavigateToDashboard={() => {
+          setSkipOnboarding(true);
+          setShowOnboarding(false);
         }}
-        onUpdateOnboarding={handleUpdateOnboarding}
-        onNavigateToDashboard={() => setSkipOnboarding(true)}
       />
     );
   }
 
-  // Regular dashboard for returning users
+  // Regular live dashboard for returning or connected users
   return (
     <div className="min-h-screen bg-bg text-text pt-6 pb-20 px-4 sm:px-6 lg:px-8">
       {/* Background ambient lighting */}

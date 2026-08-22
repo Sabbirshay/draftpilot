@@ -23,11 +23,19 @@ export default function DashboardHeader({
   dateRange,
   onDateRangeChange,
 }: DashboardHeaderProps) {
-  const { dbUser, signOut } = useAuth();
-  const userEmail = dbUser?.email || 'agent@company.com';
-  const teamName = dbUser?.teams?.name || 'My Team';
-  const fullName = dbUser?.full_name || userEmail.split('@')[0];
-  const avatarUrl = dbUser?.avatar_url || null;
+  const { dbUser, user, signOut } = useAuth();
+  const userEmail = dbUser?.email || user?.email || '';
+  const fullName =
+    dbUser?.full_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    (userEmail ? userEmail.split('@')[0] : 'Support Agent');
+  const avatarUrl =
+    dbUser?.avatar_url ||
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    null;
+  const teamName = dbUser?.teams?.name || `${fullName}'s Team`;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
