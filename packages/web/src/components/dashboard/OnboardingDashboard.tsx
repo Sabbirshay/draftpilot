@@ -25,6 +25,7 @@ export default function OnboardingDashboard({
   onNavigateToDashboard,
 }: OnboardingDashboardProps) {
   const [expandedDraft, setExpandedDraft] = useState(true);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const firstName = userName?.split(' ')[0] || userName?.split('@')[0] || 'there';
 
   const completedCount = [
@@ -39,6 +40,10 @@ export default function OnboardingDashboard({
     if (!onboardingState.viewed_demo) {
       onUpdateOnboarding?.({ viewed_demo: true });
     }
+  };
+
+  const handleToggleStep = (step: keyof OnboardingState) => {
+    onUpdateOnboarding?.({ [step]: !onboardingState[step] });
   };
 
   return (
@@ -109,17 +114,15 @@ export default function OnboardingDashboard({
                 Install the DraftPilot Chrome extension and connect your Gmail to start seeing real AI-drafted replies for your incoming support emails.
               </p>
             </div>
-            <a
-              href="https://chrome.google.com/webstore"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-sm shadow-[0_0_30px_rgba(124,58,237,0.5)] hover:shadow-[0_0_40px_rgba(124,58,237,0.7)] transition-all flex items-center gap-2 animate-pulse hover:animate-none"
+            <button
+              onClick={() => setIsInstallModalOpen(true)}
+              className="shrink-0 px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-sm shadow-[0_0_30px_rgba(124,58,237,0.5)] hover:shadow-[0_0_40px_rgba(124,58,237,0.7)] transition-all flex items-center gap-2 animate-pulse hover:animate-none cursor-pointer"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
               </svg>
               <span>Install Chrome Extension</span>
-            </a>
+            </button>
           </div>
         </motion.div>
 
@@ -221,37 +224,39 @@ export default function OnboardingDashboard({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4, duration: 0.4 }}
-            className="rounded-2xl border border-border bg-bg-card/80 backdrop-blur-xl p-5 sm:p-6"
+            className="rounded-2xl border border-border bg-bg-card/80 backdrop-blur-xl p-5 sm:p-6 flex flex-col justify-between"
           >
-            <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-              <span>🚀</span>
-              <span>Quick Setup</span>
-            </h3>
+            <div>
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+                <span>🚀</span>
+                <span>Quick Setup</span>
+              </h3>
 
-            <div className="space-y-3">
-              {/* Step 1: Connect Gmail */}
-              <ChecklistItem
-                completed={onboardingState.gmail_connected}
-                label="Connect Gmail"
-                description="Link your inbox to get real-time draft suggestions"
-                icon="📧"
-              />
+              <div className="space-y-3">
+                <ChecklistItem
+                  completed={onboardingState.gmail_connected}
+                  label="Connect Gmail"
+                  description="Link your inbox to get real-time draft suggestions"
+                  icon="📧"
+                  onClick={() => setIsInstallModalOpen(true)}
+                />
 
-              {/* Step 2: Add first macro */}
-              <ChecklistItem
-                completed={onboardingState.first_macro_added}
-                label="Add your first real macro"
-                description="Create a custom reply template for your team"
-                icon="📝"
-              />
+                <ChecklistItem
+                  completed={onboardingState.first_macro_added}
+                  label="Add your first real macro"
+                  description="Create a custom reply template for your team"
+                  icon="📝"
+                  onClick={() => handleToggleStep('first_macro_added')}
+                />
 
-              {/* Step 3: Install extension */}
-              <ChecklistItem
-                completed={onboardingState.extension_installed}
-                label="Install Chrome extension"
-                description="Get AI drafts directly in your Gmail compose window"
-                icon="🧩"
-              />
+                <ChecklistItem
+                  completed={onboardingState.extension_installed}
+                  label="Install Chrome extension"
+                  description="Get AI drafts directly in your Gmail compose window"
+                  icon="🧩"
+                  onClick={() => setIsInstallModalOpen(true)}
+                />
+              </div>
             </div>
 
             {/* Skip to dashboard link */}
@@ -342,6 +347,77 @@ export default function OnboardingDashboard({
         </motion.div>
 
       </div>
+
+      {/* ===== Interactive Chrome Extension Install Modal ===== */}
+      <AnimatePresence>
+        {isInstallModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg rounded-3xl bg-bg-card border border-border p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden"
+            >
+              <button
+                onClick={() => setIsInstallModalOpen(false)}
+                className="absolute right-5 top-5 text-text-dim hover:text-text text-sm p-1 rounded-full bg-elevated border border-border cursor-pointer"
+              >
+                ✕
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-accent to-cyan flex items-center justify-center shadow-lg">
+                  <span className="text-2xl">🧩</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">Install DraftPilot Extension</h3>
+                  <p className="text-xs text-text-muted">Manifest V3 · Production Ready</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2">
+                  <p className="font-semibold text-text flex items-center gap-1.5">
+                    <span>⚡</span>
+                    <span>Option 1: Load in Chrome (Instant Testing)</span>
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-text-muted text-[11px] pl-1 leading-relaxed">
+                    <li>Open Chrome and navigate to <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">chrome://extensions</code></li>
+                    <li>Toggle ON <strong>Developer mode</strong> in the top-right corner</li>
+                    <li>Click <strong>Load unpacked</strong></li>
+                    <li>Select the folder: <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">packages/extension/dist</code></li>
+                  </ol>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2">
+                  <p className="font-semibold text-text flex items-center gap-1.5">
+                    <span>🌐</span>
+                    <span>Option 2: Chrome Web Store</span>
+                  </p>
+                  <p className="text-[11px] text-text-muted leading-relaxed">
+                    Package <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">draftpilot-chrome-extension-v0.1.0.zip</code> is generated and ready to upload to the Chrome Developer Dashboard.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    handleToggleStep('extension_installed');
+                    handleToggleStep('gmail_connected');
+                    setIsInstallModalOpen(false);
+                    onNavigateToDashboard?.();
+                  }}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer text-center"
+                >
+                  ✓ Mark as Installed &amp; Enter Dashboard
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
@@ -353,18 +429,21 @@ function ChecklistItem({
   label,
   description,
   icon,
+  onClick,
 }: {
   completed: boolean;
   label: string;
   description: string;
   icon: string;
+  onClick?: () => void;
 }) {
   return (
     <div
-      className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+      onClick={onClick}
+      className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
         completed
           ? 'border-success/30 bg-success/5'
-          : 'border-border bg-elevated/30 hover:border-border-hover'
+          : 'border-border bg-elevated/30 hover:border-accent/40'
       }`}
     >
       <div

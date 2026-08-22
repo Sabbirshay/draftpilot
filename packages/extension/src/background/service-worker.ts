@@ -1,11 +1,23 @@
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.id) {
-    chrome.sidePanel.open({ tabId: tab.id });
+// Configure side panel to open on action click
+chrome.runtime.onInstalled.addListener(() => {
+  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
+      // Fallback for older Chrome versions
+    });
+  }
+});
+
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab.id && chrome.sidePanel) {
+    try {
+      await chrome.sidePanel.open({ tabId: tab.id });
+    } catch {
+      // Fallback
+    }
   }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // We use async inside the listener but must return true to indicate we'll sendResponse later
   const handleMessage = async () => {
     try {
       if (message.type === 'GET_AUTH_TOKEN') {
