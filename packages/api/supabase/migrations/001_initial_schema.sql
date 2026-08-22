@@ -86,7 +86,25 @@ CREATE INDEX IF NOT EXISTS idx_doc_chunks_team ON document_chunks(team_id);
 CREATE INDEX IF NOT EXISTS idx_usage_team_month ON usage(team_id, month);
 CREATE INDEX IF NOT EXISTS idx_draft_history_team ON draft_history(team_id);
 
--- 9. Vector Similarity Search RPC Function
+-- 9. Enable Row Level Security (RLS) on all tables
+ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE macros ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE draft_history ENABLE ROW LEVEL SECURITY;
+
+-- 10. Service Role / Backend Bypass Policies (Backend API has full team-isolated access)
+CREATE POLICY "Service Role Full Access on Teams" ON teams FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Users" ON users FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Macros" ON macros FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Knowledge Docs" ON knowledge_documents FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Document Chunks" ON document_chunks FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Usage" ON usage FOR ALL USING (true);
+CREATE POLICY "Service Role Full Access on Draft History" ON draft_history FOR ALL USING (true);
+
+-- 11. Vector Similarity Search RPC Function
 CREATE OR REPLACE FUNCTION match_document_chunks (
   query_embedding vector(1536),
   match_threshold float,
