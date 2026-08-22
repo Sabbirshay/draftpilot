@@ -36,6 +36,7 @@ export class MacrosService {
       .insert({
         team_id: teamId,
         name: dto.name,
+        category: dto.category || 'General',
         content: dto.content,
         tags: dto.tags || [],
       })

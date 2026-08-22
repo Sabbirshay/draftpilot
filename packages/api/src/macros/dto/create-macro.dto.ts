@@ -7,6 +7,11 @@ export class CreateMacroDto {
   @IsNotEmpty()
   name!: string;
 
+  @ApiProperty({ required: false, default: 'General' })
+  @IsString()
+  @IsOptional()
+  category?: string;
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
