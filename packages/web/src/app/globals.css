@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+  }
+  
+  body {
+    @apply bg-bg text-text antialiased;
+  }
+
+  ::selection {
+    @apply bg-accent text-white;
+  }
+
+  /* Force dark theme for all form inputs & prevent white browser autofill */
+  input, select, textarea {
+    color-scheme: dark;
+    background-color: #16181e;
+    color: #f4f5f8;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus, 
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #16181e inset !important;
+    -webkit-text-fill-color: #f4f5f8 !important;
+    caret-color: #f4f5f8 !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-bg;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-hover rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-dim;
+  }
+}

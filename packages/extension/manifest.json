@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "DraftPilot — AI Support Reply Assistant",
+  "version": "0.1.0",
+  "description": "AI-drafted replies inside the inbox you already use. Built for small support teams.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://mail.google.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://mail.google.com/*"],
+      "js": ["gmail-detector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {},
+  "icons": {}
+}

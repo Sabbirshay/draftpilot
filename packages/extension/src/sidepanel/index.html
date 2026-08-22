@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DraftPilot</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login View -->
+    <div id="login-view" class="view hidden">
+      <div class="header-center">
+        <h2>DraftPilot</h2>
+        <p>AI Support Reply Assistant</p>
+      </div>
+      
+      <div id="login-form-container">
+        <form id="login-form">
+          <input type="email" id="login-email" placeholder="Email" required>
+          <input type="password" id="login-password" placeholder="Password" required>
+          <button type="submit" class="btn btn-primary">Log In</button>
+        </form>
+        <p class="text-center mt-3"><a href="#" id="show-register">Create account</a></p>
+      </div>
+
+      <div id="register-form-container" class="hidden">
+        <form id="register-form">
+          <input type="email" id="reg-email" placeholder="Email" required>
+          <input type="password" id="reg-password" placeholder="Password" required>
+          <input type="text" id="reg-team" placeholder="Team Name" required>
+          <button type="submit" class="btn btn-primary">Sign Up</button>
+        </form>
+        <p class="text-center mt-3"><a href="#" id="show-login">Back to login</a></p>
+      </div>
+
+      <div id="auth-error" class="error-msg hidden"></div>
+    </div>
+
+    <!-- Main View -->
+    <div id="main-view" class="view hidden">
+      <header>
+        <div class="brand">DraftPilot</div>
+        <div class="header-right">
+          <span id="user-email" class="text-xs text-muted"></span>
+          <button id="logout-btn" class="btn btn-ghost btn-sm">Logout</button>
+        </div>
+      </header>
+
+      <div class="usage-badge" id="usage-container">
+        <div class="usage-text">
+          <span id="usage-count">0/0</span> drafts this month
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="usage-progress" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="draft">Draft</button>
+        <button class="tab" data-tab="macros">Macros</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </nav>
+
+      <div class="tab-content">
+        <!-- Draft Tab -->
+        <div id="tab-draft" class="tab-pane active">
+          <div id="thread-status" class="status-box waiting">
+            Waiting for Gmail reply...
+          </div>
+          <div id="thread-preview" class="hidden"></div>
+          
+          <div class="form-group mt-3">
+            <input type="text" id="macro-hint" placeholder="Optional instruction (e.g. 'Use refund macro')">
+          </div>
+
+          <button id="generate-btn" class="btn btn-primary btn-block mt-3" disabled>Generate Draft</button>
+          
+          <div id="draft-result-container" class="hidden mt-4">
+            <h4>Generated Draft</h4>
+            <div id="draft-content" class="draft-box"></div>
+            
+            <div class="action-buttons mt-3">
+              <button id="insert-btn" class="btn btn-primary">Insert into Reply</button>
+              <button id="copy-btn" class="btn btn-secondary">Copy to Clipboard</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Macros Tab -->
+        <div id="tab-macros" class="tab-pane hidden">
+          <button id="show-add-macro-btn" class="btn btn-secondary btn-block mb-3">Add Macro</button>
+          
+          <form id="add-macro-form" class="hidden form-card mb-4">
+            <input type="text" id="macro-name" placeholder="Macro Name" required>
+            <textarea id="macro-content" placeholder="Content (Hi {{name}}, ...)" rows="4" required></textarea>
+            <input type="text" id="macro-tags" placeholder="Tags (comma separated)">
+            <div class="row">
+              <button type="submit" class="btn btn-primary btn-sm flex-1">Save</button>
+              <button type="button" id="cancel-macro-btn" class="btn btn-ghost btn-sm flex-1">Cancel</button>
+            </div>
+          </form>
+
+          <div id="macros-list"></div>
+          <div id="macros-empty" class="hidden text-center text-muted mt-4">
+            Add your first macro — paste your team's canned responses here
+          </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="tab-settings" class="tab-pane hidden">
+          <div class="card">
+            <h4>Account</h4>
+            <p class="text-sm">Team: <strong id="settings-team"></strong></p>
+            <p class="text-sm">Plan: <strong id="settings-plan"></strong></p>
+          </div>
+
+          <div class="card mt-3">
+            <h4>Billing</h4>
+            <button id="billing-btn" class="btn btn-secondary btn-block mt-2">Manage Billing</button>
+          </div>
+          
+          <div class="card mt-3">
+            <h4>Developer</h4>
+            <input type="text" id="api-url" placeholder="API URL (http://localhost:3001)">
+            <button id="save-api-url" class="btn btn-ghost btn-sm mt-2">Save URL</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="sidepanel.ts"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "draftpilot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-powered support reply co-pilot — Chrome extension for small support teams",
+  "scripts": {
+    "dev:api": "pnpm --filter @draftpilot/api dev",
+    "dev:web": "pnpm --filter @draftpilot/web dev",
+    "dev:ext": "pnpm --filter @draftpilot/extension dev",
+    "build:api": "pnpm --filter @draftpilot/api build",
+    "build:web": "pnpm --filter @draftpilot/web build",
+    "build:ext": "pnpm --filter @draftpilot/extension build",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
