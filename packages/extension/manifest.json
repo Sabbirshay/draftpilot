@@ -20,7 +20,8 @@
     "sidePanel",
     "storage",
     "activeTab",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "*://mail.google.com/*"

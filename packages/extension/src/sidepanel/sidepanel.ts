@@ -5,6 +5,7 @@ class SidePanel {
   private currentDraft: string = '';
   private macros: any[] = [];
   private pollInterval: any = null;
+  private customerName: string = 'there';
 
   constructor() {
     this.init();
@@ -22,7 +23,7 @@ class SidePanel {
       const data = await apiClient.getMe();
       this.showView('main-view');
       this.loadUserData(data);
-      this.loadMacros();
+      await this.loadMacros();
       this.pollActiveTabForThread();
     } catch {
       this.showView('login-view');
@@ -32,6 +33,28 @@ class SidePanel {
   private showView(viewId: string) {
     document.querySelectorAll('.view').forEach((el) => el.classList.add('hidden'));
     document.getElementById(viewId)?.classList.remove('hidden');
+  }
+
+  private async getGmailTab(): Promise<chrome.tabs.Tab | null> {
+    try {
+      const lastTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (lastTabs[0] && lastTabs[0].url && lastTabs[0].url.includes('mail.google.com')) {
+        return lastTabs[0];
+      }
+
+      const currTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (currTabs[0] && currTabs[0].url && currTabs[0].url.includes('mail.google.com')) {
+        return currTabs[0];
+      }
+
+      const allGmail = await chrome.tabs.query({ url: '*://mail.google.com/*' });
+      if (allGmail.length > 0) {
+        return allGmail[0];
+      }
+    } catch {
+      // Ignore
+    }
+    return null;
   }
 
   private attachEventListeners() {
@@ -107,11 +130,10 @@ class SidePanel {
     document.getElementById('generate-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('generate-btn') as HTMLButtonElement;
       btn.disabled = true;
-      btn.innerText = '✨ Drafting AI Reply...';
+      btn.innerText = '✨ Generating AI Draft...';
 
       const hint = (document.getElementById('macro-hint') as HTMLInputElement).value;
 
-      // If thread not captured yet, attempt instant active tab scan
       if (!this.currentThreadText) {
         await this.pollActiveTabForThread(false);
       }
@@ -131,28 +153,19 @@ class SidePanel {
         }
 
         document.getElementById('draft-result-container')?.classList.remove('hidden');
-        await this.loadUsage(); // Refresh usage
+        await this.loadUsage();
       } catch (err: any) {
         alert(`Draft error: ${err.message}`);
       } finally {
         btn.disabled = false;
-        btn.innerText = 'Generate AI Draft';
+        btn.innerText = '✨ Generate Contextual AI Draft';
       }
     });
 
-    // Insert into Gmail
+    // Insert into Gmail Reply
     document.getElementById('insert-btn')?.addEventListener('click', async () => {
       if (!this.currentDraft) return;
-
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        chrome.tabs.sendMessage(tab.id, { type: 'INSERT_DRAFT', draft: this.currentDraft }, (res) => {
-          const btn = document.getElementById('insert-btn') as HTMLButtonElement;
-          const orig = btn.innerText;
-          btn.innerText = '✓ Inserted into Gmail!';
-          setTimeout(() => (btn.innerText = orig), 2000);
-        });
-      }
+      await this.insertTextIntoGmailTab(this.currentDraft);
     });
 
     // Copy to clipboard
@@ -166,7 +179,7 @@ class SidePanel {
       }
     });
 
-    // Macros
+    // Macros Form
     document.getElementById('show-add-macro-btn')?.addEventListener('click', () => {
       document.getElementById('add-macro-form')?.classList.remove('hidden');
       document.getElementById('show-add-macro-btn')?.classList.add('hidden');
@@ -195,7 +208,7 @@ class SidePanel {
       }
     });
 
-    // Open Web Dashboard
+    // Web Dashboard Link
     document.getElementById('billing-btn')?.addEventListener('click', () => {
       window.open('https://draftpilot-web.vercel.app/dashboard', '_blank');
     });
@@ -256,7 +269,50 @@ class SidePanel {
       this.macros = await apiClient.getMacros();
       const listEl = document.getElementById('macros-list');
       const emptyEl = document.getElementById('macros-empty');
+      const quickListEl = document.getElementById('quick-macros-list');
+      const countChipEl = document.getElementById('macros-count-chip');
 
+      if (countChipEl) countChipEl.innerText = `${this.macros.length} loaded`;
+
+      // 1. Populate Quick Macros on Draft Tab
+      if (quickListEl) {
+        if (this.macros.length === 0) {
+          quickListEl.innerHTML = '<span style="font-size: 10px; color: #6b7280;">No macros added yet</span>';
+        } else {
+          quickListEl.innerHTML = this.macros
+            .slice(0, 6)
+            .map(
+              (m) => `
+            <button class="quick-macro-chip" data-id="${m.id}" style="padding: 4px 8px; font-size: 10px; font-weight: 600; border-radius: 6px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3); color: #c4b5fd; cursor: pointer; transition: all 0.2s;">
+              ⚡ ${m.name}
+            </button>
+          `
+            )
+            .join('');
+
+          quickListEl.querySelectorAll('.quick-macro-chip').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+              const target = e.currentTarget as HTMLElement;
+              const id = target.dataset.id;
+              const macro = this.macros.find((m) => m.id === id);
+              if (macro) {
+                const formatted = macro.content
+                  .replace(/{{name}}/g, this.customerName)
+                  .replace(/{{customer_name}}/g, this.customerName)
+                  .replace(/\[Customer\]/g, this.customerName);
+
+                const orig = target.innerText;
+                target.innerText = '✓ Inserting...';
+                await this.insertTextIntoGmailTab(formatted);
+                target.innerText = '✓ Inserted!';
+                setTimeout(() => (target.innerText = orig), 2000);
+              }
+            });
+          });
+        }
+      }
+
+      // 2. Populate Full Macros Tab
       if (!listEl || !emptyEl) return;
 
       if (this.macros.length === 0) {
@@ -267,18 +323,42 @@ class SidePanel {
         listEl.innerHTML = this.macros
           .map(
             (m) => `
-          <div class="card macro-item mt-2" style="padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;">
-            <div class="flex-between" style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div class="card macro-item mt-2" style="padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
               <strong style="font-size: 12px; color: #f3f4f6;">${m.name}</strong>
               <button class="btn btn-ghost btn-sm text-error delete-macro" data-id="${m.id}" style="color: #f87171; font-size: 11px; padding: 2px 6px; cursor: pointer;">✕</button>
             </div>
-            <div style="font-size: 11px; color: #9ca3af; margin-top: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${m.content}</div>
+            <div style="font-size: 11px; color: #9ca3af; line-height: 1.4; margin-bottom: 8px; max-height: 50px; overflow: hidden; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">${m.content}</div>
+            <button class="btn-use-macro" data-id="${m.id}" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 700; border-radius: 8px; background: #7c3aed; color: white; border: none; cursor: pointer; transition: all 0.2s;">
+              ⚡ Insert Macro into Gmail Reply
+            </button>
           </div>
         `
           )
           .join('');
 
-        document.querySelectorAll('.delete-macro').forEach((btn) => {
+        // Attach click listeners for "Insert Macro" buttons
+        listEl.querySelectorAll('.btn-use-macro').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            const target = e.currentTarget as HTMLElement;
+            const id = target.dataset.id;
+            const macro = this.macros.find((m) => m.id === id);
+            if (macro) {
+              const formatted = macro.content
+                .replace(/{{name}}/g, this.customerName)
+                .replace(/{{customer_name}}/g, this.customerName)
+                .replace(/\[Customer\]/g, this.customerName);
+
+              target.innerText = '✓ Inserting into Gmail...';
+              await this.insertTextIntoGmailTab(formatted);
+              target.innerText = '✓ Inserted into Gmail Reply!';
+              setTimeout(() => (target.innerText = '⚡ Insert Macro into Gmail Reply'), 2500);
+            }
+          });
+        });
+
+        // Attach delete listeners
+        listEl.querySelectorAll('.delete-macro').forEach((btn) => {
           btn.addEventListener('click', async (e) => {
             const id = (e.target as HTMLElement).dataset.id;
             if (id && confirm('Delete this macro?')) {
@@ -297,6 +377,12 @@ class SidePanel {
     if (!text || text.trim().length === 0) return;
 
     this.currentThreadText = text;
+
+    // Extract customer first name
+    const match = text.match(/(?:from|hi|dear|hello)\s+([A-Z][a-z]+)/i);
+    if (match && match[1]) {
+      this.customerName = match[1];
+    }
 
     const statusEl = document.getElementById('thread-status');
     if (statusEl) {
@@ -319,29 +405,140 @@ class SidePanel {
 
   public async pollActiveTabForThread(manual: boolean = false) {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id && tab.url && tab.url.includes('mail.google.com')) {
-        chrome.tabs.sendMessage(tab.id, { type: 'GET_THREAD_CONTENT' }, (response) => {
-          if (chrome.runtime.lastError) {
-            // Content script not loaded or page loading
-            return;
-          }
-          if (response && response.text) {
-            this.handleThreadDetected(response.text);
-          } else if (manual) {
-            const statusEl = document.getElementById('thread-status');
-            if (statusEl) statusEl.innerText = 'Open an email thread to draft';
-          }
-        });
-      }
+      const tab = await this.getGmailTab();
+      if (!tab?.id) return;
+
+      // 1. Try messaging content script
+      chrome.tabs.sendMessage(tab.id, { type: 'GET_THREAD_CONTENT' }, (response) => {
+        if (!chrome.runtime.lastError && response && response.text) {
+          this.handleThreadDetected(response.text);
+          return;
+        }
+
+        // 2. Fallback: Direct script execution
+        if (chrome.scripting && tab.id) {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId: tab.id },
+              func: () => {
+                let text = '';
+                const subject = document.querySelector('h2.hP, h2[data-thread-perm-id]')?.textContent?.trim();
+                if (subject) text += `Subject: ${subject}\n\n`;
+
+                const bodies = document.querySelectorAll('.a3s.aiL, .a3s, .ii.gt, div[data-message-id]');
+                bodies.forEach((b) => {
+                  const t = (b as HTMLElement).innerText?.trim();
+                  if (t && t.length > 10) text += t + '\n\n';
+                });
+
+                if (!text.trim()) {
+                  const main = document.querySelector('div[role="main"]');
+                  if (main) text = (main as HTMLElement).innerText?.slice(0, 1500) || '';
+                }
+                return text.trim();
+              },
+            },
+            (results) => {
+              if (results && results[0] && results[0].result) {
+                this.handleThreadDetected(results[0].result as string);
+              } else if (manual) {
+                const statusEl = document.getElementById('thread-status');
+                if (statusEl) statusEl.innerText = 'Ready — Open an email thread';
+              }
+            }
+          );
+        }
+      });
     } catch {
       // Ignore
     }
   }
 
+  private async insertTextIntoGmailTab(textToInsert: string) {
+    const tab = await this.getGmailTab();
+    if (!tab?.id) {
+      alert('Please keep your Gmail tab open in Chrome.');
+      return;
+    }
+
+    // 1. Try messaging content script
+    chrome.tabs.sendMessage(tab.id, { type: 'INSERT_DRAFT', draft: textToInsert }, (res) => {
+      if (!chrome.runtime.lastError && res && res.success) {
+        const btn = document.getElementById('insert-btn') as HTMLButtonElement;
+        if (btn) {
+          const orig = btn.innerText;
+          btn.innerText = '✓ Inserted into Gmail!';
+          setTimeout(() => (btn.innerText = orig), 2000);
+        }
+        return;
+      }
+
+      // 2. Fallback: Direct scripting insertion into active Gmail editable element
+      if (chrome.scripting && tab.id) {
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: tab.id },
+            args: [textToInsert],
+            func: (rawText) => {
+              const selectors = [
+                'div[role="textbox"][contenteditable="true"]',
+                'div[role="textbox"][g_editable="true"]',
+                'div[aria-label*="Message Body"]',
+                'div[aria-label*="Reply"]',
+                'div.Am.Al.editable',
+                'div.editable[contenteditable="true"]',
+                'div[role="textbox"]',
+              ];
+
+              let target: HTMLElement | null = null;
+              for (const sel of selectors) {
+                const els = document.querySelectorAll(sel);
+                for (let i = 0; i < els.length; i++) {
+                  const el = els[i] as HTMLElement;
+                  if (el.offsetParent !== null) {
+                    target = el;
+                    break;
+                  }
+                }
+                if (target) break;
+              }
+
+              if (target) {
+                target.focus();
+                const html = rawText.replace(/\n/g, '<br>');
+                try {
+                  if (!document.execCommand('insertHTML', false, html)) {
+                    target.innerHTML = html;
+                  }
+                } catch {
+                  target.innerHTML = html;
+                }
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+              }
+              return false;
+            },
+          },
+          (results) => {
+            const btn = document.getElementById('insert-btn') as HTMLButtonElement;
+            if (btn) {
+              const orig = btn.innerText;
+              if (results && results[0] && results[0].result) {
+                btn.innerText = '✓ Inserted into Gmail!';
+              } else {
+                btn.innerText = '⚠️ Click Reply in Gmail first';
+              }
+              setTimeout(() => (btn.innerText = orig), 2500);
+            }
+          }
+        );
+      }
+    });
+  }
+
   private startActivePolling() {
     if (this.pollInterval) clearInterval(this.pollInterval);
-    // Poll every 2 seconds while panel is open
     this.pollInterval = setInterval(() => {
       this.pollActiveTabForThread();
     }, 2000);
