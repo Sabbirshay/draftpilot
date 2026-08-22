@@ -14,286 +14,169 @@ export interface UploadedDoc {
   status: 'Indexed & Ready' | 'Processing';
 }
 
-const INITIAL_DOCS: UploadedDoc[] = [
-  {
-    id: 'doc-1',
-    name: 'Customer_Support_Policy_&_Refunds_2026.pdf',
-    type: 'PDF',
-    size: '1.4 MB',
-    chunksCount: 84,
-    extractedMacrosCount: 18,
-    uploadedAt: 'Today, 2:15 PM',
-    status: 'Indexed & Ready',
-  },
-  {
-    id: 'doc-2',
-    name: 'Product_Catalog_&_Troubleshooting_FAQ.xlsx',
-    type: 'Excel',
-    size: '860 KB',
-    chunksCount: 112,
-    extractedMacrosCount: 16,
-    uploadedAt: 'Yesterday',
-    status: 'Indexed & Ready',
-  },
-  {
-    id: 'doc-3',
-    name: 'SaaS_Terms_SLA_and_Security_Rules.docx',
-    type: 'Word',
-    size: '520 KB',
-    chunksCount: 65,
-    extractedMacrosCount: 16,
-    uploadedAt: '3 days ago',
-    status: 'Indexed & Ready',
-  },
-];
-
-interface DocumentUploaderProps {
-  onMacrosExtracted: (count: number) => void;
+export interface DocumentUploaderProps {
+  onExtractionComplete?: (count: number) => void;
 }
 
-export default function DocumentUploader({ onMacrosExtracted }: DocumentUploaderProps) {
-  const [docs, setDocs] = useState<UploadedDoc[]>(INITIAL_DOCS);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStage, setProcessingStage] = useState('');
-  const [uploadSuccessNotice, setUploadSuccessNotice] = useState<string | null>(null);
+export default function DocumentUploader({ onExtractionComplete }: DocumentUploaderProps) {
+  const [docs, setDocs] = useState<UploadedDoc[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
-  const simulateFileUpload = (fileName: string, fileType: UploadedDoc['type'], fileSize: string) => {
-    setIsProcessing(true);
-    setProcessingStage('Reading document bytes & extracting text chunks...');
+  const handleSimulatedUpload = (fileName: string, type: UploadedDoc['type'], size: string) => {
+    setIsUploading(true);
+
+    const newDocId = `doc-${Date.now()}`;
+    const processingDoc: UploadedDoc = {
+      id: newDocId,
+      name: fileName,
+      type,
+      size,
+      chunksCount: 0,
+      extractedMacrosCount: 0,
+      uploadedAt: 'Just now',
+      status: 'Processing',
+    };
+
+    setDocs((prev) => [processingDoc, ...prev]);
 
     setTimeout(() => {
-      setProcessingStage('Vectorizing embeddings & matching support topics...');
-      setTimeout(() => {
-        setProcessingStage('AI generating 50 structured, tagged team support macros...');
-        setTimeout(() => {
-          const newDoc: UploadedDoc = {
-            id: String(Date.now()),
-            name: fileName,
-            type: fileType,
-            size: fileSize,
-            chunksCount: Math.floor(Math.random() * 60) + 70,
-            extractedMacrosCount: 50,
-            uploadedAt: 'Just now',
-            status: 'Indexed & Ready',
-          };
+      const extractedCount = Math.floor(Math.random() * 6) + 4;
+      const chunks = Math.floor(Math.random() * 40) + 25;
 
-          setDocs([newDoc, ...docs]);
-          setIsProcessing(false);
-          setProcessingStage('');
-          onMacrosExtracted(50);
-          setUploadSuccessNotice(`Successfully analyzed "${fileName}"! Full document indexed in Vector KB + 50 structured macros generated.`);
-          setTimeout(() => setUploadSuccessNotice(null), 5000);
-        }, 800);
-      }, 750);
-    }, 750);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      let type: UploadedDoc['type'] = 'PDF';
-      if (ext === 'docx' || ext === 'doc') type = 'Word';
-      else if (ext === 'xlsx' || ext === 'csv') type = 'Excel';
-      else if (ext === 'md') type = 'Markdown';
-      else if (ext === 'json') type = 'JSON';
-
-      const sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-      simulateFileUpload(file.name, type, sizeStr);
-    }
+      setDocs((prev) =>
+        prev.map((d) =>
+          d.id === newDocId
+            ? {
+                ...d,
+                chunksCount: chunks,
+                extractedMacrosCount: extractedCount,
+                status: 'Indexed & Ready',
+              }
+            : d
+        )
+      );
+      setIsUploading(false);
+      onExtractionComplete?.(extractedCount);
+    }, 2000);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      let type: UploadedDoc['type'] = 'PDF';
-      if (ext === 'docx' || ext === 'doc') type = 'Word';
-      else if (ext === 'xlsx' || ext === 'csv') type = 'Excel';
-      else if (ext === 'md') type = 'Markdown';
-      else if (ext === 'json') type = 'JSON';
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      const sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-      simulateFileUpload(file.name, type, sizeStr);
-    }
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    let type: UploadedDoc['type'] = 'PDF';
+    if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') type = 'Excel';
+    else if (ext === 'docx' || ext === 'doc') type = 'Word';
+    else if (ext === 'md') type = 'Markdown';
+    else if (ext === 'json') type = 'JSON';
+    else if (ext === 'txt') type = 'Text';
+
+    const sizeStr = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+    handleSimulatedUpload(file.name, type, sizeStr);
   };
 
-  const handleDeleteDoc = (id: string) => {
-    setDocs(docs.filter((d) => d.id !== id));
+  const handleDelete = (id: string) => {
+    setDocs((prev) => prev.filter((d) => d.id !== id));
   };
 
   return (
     <div className="space-y-6">
-      {uploadSuccessNotice && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center justify-between shadow-lg"
-        >
-          <div className="flex items-center gap-2">
-            <span>✨</span>
-            <span>{uploadSuccessNotice}</span>
-          </div>
-          <span className="text-[10px] text-emerald-300 font-mono">Synced to Gmail Extension</span>
-        </motion.div>
-      )}
-
-      {/* ─────────────────────────────────────────────────────────────
-          1. KNOWLEDGE BASE TWO-TIER ARCHITECTURE EXPLAINER BANNER
-      ───────────────────────────────────────────────────────────── */}
-      <div className="p-5 rounded-3xl bg-gradient-to-r from-accent/15 via-elevated to-bg border border-accent/30 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm">🧠</span>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-accent-light font-mono">
-              Deep Document Knowledge Base &amp; Auto-Macro Engine
-            </h4>
-          </div>
-          <p className="text-xs text-text-muted leading-relaxed">
-            When you upload files, the AI indexes the <strong>entire document text into your vector knowledge base</strong> to answer complex, nuanced customer questions in Gmail. In addition, it extracts <strong>50 categorized, ready-to-use macros</strong> for 1-click team use.
-          </p>
-        </div>
-
-        <div className="px-3.5 py-1.5 rounded-full bg-accent/20 border border-accent/40 text-accent-light text-[11px] font-bold font-mono shrink-0">
-          🟢 Unlimited Knowledge Grounding
-        </div>
-      </div>
-
-      {/* ─────────────────────────────────────────────────────────────
-          2. DRAG & DROP FILE UPLOAD DROPZONE
-      ───────────────────────────────────────────────────────────── */}
+      {/* Upload Box / Dropzone */}
       <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
+        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file) {
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            let type: UploadedDoc['type'] = 'PDF';
+            if (ext === 'xlsx' || ext === 'xls') type = 'Excel';
+            else if (ext === 'docx') type = 'Word';
+            else if (ext === 'md') type = 'Markdown';
+            handleSimulatedUpload(file.name, type, (file.size / 1024 / 1024).toFixed(1) + ' MB');
+          }
+        }}
         className={`p-8 sm:p-10 rounded-3xl border-2 border-dashed transition-all text-center flex flex-col items-center justify-center relative overflow-hidden ${
-          isDragging
-            ? 'border-accent bg-accent/15 scale-[1.01]'
-            : 'border-border/80 bg-elevated/70 hover:border-accent/50'
+          dragActive
+            ? 'border-accent bg-accent/10 shadow-[0_0_30px_rgba(124,58,237,0.3)]'
+            : 'border-border/80 bg-elevated/50 hover:border-accent/50'
         }`}
       >
-        {isProcessing ? (
-          <div className="space-y-4 py-4">
-            <div className="w-12 h-12 rounded-full border-3 border-accent border-t-transparent animate-spin mx-auto" />
-            <div>
-              <p className="text-sm font-bold text-text mb-1">AI Processing Knowledge Base File</p>
-              <p className="text-xs text-accent-light font-mono animate-pulse">{processingStage}</p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="w-16 h-16 rounded-3xl bg-accent/20 border border-accent/40 flex items-center justify-center text-2xl text-accent-light mb-4 shadow-[0_0_20px_rgba(124,58,237,0.3)]">
-              📄
-            </div>
-
-            <h3 className="text-base font-bold text-text mb-1">
-              Drop Your Knowledge Base Files Here
-            </h3>
-            <p className="text-xs text-text-dim max-w-md mb-5">
-              Supports <strong>PDF, Word (.docx), Excel (.xlsx / .csv), Markdown (.md), Text (.txt)</strong>.
-              The AI analyzes all policies, FAQs, and pricing to auto-generate 50 structured macros.
-            </p>
-
-            <label className="px-6 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold shadow-[0_0_20px_rgba(124,58,237,0.4)] transition-all cursor-pointer inline-flex items-center gap-2">
-              <span>+ Select File from Computer</span>
-              <input
-                type="file"
-                accept=".pdf,.docx,.doc,.xlsx,.csv,.md,.txt,.json"
-                onChange={handleFileInput}
-                className="hidden"
-              />
-            </label>
-
-            {/* Quick Demo Upload Buttons */}
-            <div className="mt-6 pt-4 border-t border-border/40 flex flex-wrap items-center justify-center gap-2 text-[11px] text-text-dim">
-              <span>Or try sample files:</span>
-              <button
-                type="button"
-                onClick={() => simulateFileUpload('Shopify_Store_Policy_&_Exchanges.pdf', 'PDF', '1.2 MB')}
-                className="px-2.5 py-1 rounded-lg bg-bg border border-border hover:border-accent text-text-muted hover:text-text cursor-pointer"
-              >
-                + E-Commerce FAQ.pdf
-              </button>
-              <button
-                type="button"
-                onClick={() => simulateFileUpload('SaaS_Pricing_&_Security_Manual.docx', 'Word', '740 KB')}
-                className="px-2.5 py-1 rounded-lg bg-bg border border-border hover:border-accent text-text-muted hover:text-text cursor-pointer"
-              >
-                + SaaS Docs.docx
-              </button>
-              <button
-                type="button"
-                onClick={() => simulateFileUpload('Support_Troubleshooting_Matrix.xlsx', 'Excel', '910 KB')}
-                className="px-2.5 py-1 rounded-lg bg-bg border border-border hover:border-accent text-text-muted hover:text-text cursor-pointer"
-              >
-                + Support Matrix.xlsx
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ─────────────────────────────────────────────────────────────
-          3. INGESTED DOCUMENTS ROSTER (Deep Vector Knowledge Base)
-      ───────────────────────────────────────────────────────────── */}
-      <div className="rounded-3xl bg-elevated/70 border border-border/80 overflow-hidden shadow-lg">
-        <div className="p-5 border-b border-border/40 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-text">Ingested Knowledge Base Documents</h3>
-            <p className="text-[11px] text-text-dim">
-              Full text of these documents is active in the Gmail AI draft engine
-            </p>
-          </div>
-          <span className="text-xs text-emerald-400 font-mono font-semibold">
-            ● {docs.length} Documents Active ({docs.reduce((acc, d) => acc + d.chunksCount, 0)} Chunks)
-          </span>
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-accent/20 to-cyan/20 border border-accent/30 flex items-center justify-center text-2xl mb-4 shadow-sm">
+          📁
         </div>
 
-        <div className="divide-y divide-border/40 text-xs">
-          {docs.map((doc) => (
-            <div key={doc.id} className="p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 transition-colors">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-accent/20 border border-accent/30 flex items-center justify-center font-bold text-accent-light text-sm shrink-0">
-                  {doc.type === 'PDF' && '📕'}
-                  {doc.type === 'Excel' && '📊'}
-                  {doc.type === 'Word' && '📘'}
-                  {doc.type === 'Markdown' && '📝'}
-                  {doc.type === 'JSON' && '⚙️'}
-                  {doc.type === 'Text' && '📄'}
-                </div>
+        <h3 className="text-base font-bold text-text mb-1">
+          Upload Knowledge Base Documents
+        </h3>
+        <p className="text-xs text-text-muted max-w-md mx-auto mb-5 leading-relaxed">
+          Drag &amp; drop PDF policies, Word manuals, Excel FAQs, or Markdown docs. DraftPilot extracts and converts them into searchable team macros.
+        </p>
 
-                <div>
-                  <p className="font-bold text-text text-xs sm:text-sm">{doc.name}</p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-dim mt-0.5 font-mono">
-                    <span className="px-1.5 py-0.2 rounded bg-bg border border-border">{doc.type}</span>
-                    <span>• {doc.size}</span>
-                    <span>• {doc.chunksCount} Indexed Chunks</span>
-                    <span>• {doc.extractedMacrosCount} Auto-Generated Macros</span>
+        <label className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer flex items-center gap-2">
+          <span>⬆️</span>
+          <span>{isUploading ? 'Parsing & Indexing...' : 'Browse Document Files'}</span>
+          <input
+            type="file"
+            accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.md,.txt,.json"
+            onChange={handleFileInput}
+            className="hidden"
+            disabled={isUploading}
+          />
+        </label>
+
+        <p className="text-[10px] text-text-dim mt-3">
+          Supported formats: PDF, DOCX, XLSX, CSV, Markdown, Plain Text (up to 25MB each)
+        </p>
+      </div>
+
+      {/* Uploaded Documents Table / Cards */}
+      {docs.length > 0 && (
+        <div className="rounded-3xl bg-elevated/70 border border-border/80 shadow-lg overflow-hidden">
+          <div className="p-5 border-b border-border/50 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-text">Indexed Knowledge Base Sources ({docs.length})</h3>
+            <span className="text-[11px] text-text-dim">Vector chunks active</span>
+          </div>
+
+          <div className="divide-y divide-border/40">
+            {docs.map((doc) => (
+              <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-bg border border-border flex items-center justify-center text-xs font-bold text-accent font-mono shrink-0">
+                    {doc.type}
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text">{doc.name}</h4>
+                    <p className="text-[11px] text-text-dim mt-0.5">
+                      {doc.size} · {doc.chunksCount} chunks · {doc.extractedMacrosCount} macros generated
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span>{doc.status}</span>
-                </span>
+                <div className="flex items-center justify-between sm:justify-end gap-5 text-xs">
+                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                    doc.status === 'Indexed & Ready' ? 'text-emerald-400' : 'text-amber-400'
+                  }`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                    {doc.status}
+                  </span>
 
-                <button
-                  onClick={() => handleDeleteDoc(doc.id)}
-                  className="text-red-400 hover:text-red-300 text-xs font-medium cursor-pointer p-1"
-                  title="Remove document"
-                >
-                  Delete
-                </button>
+                  <button
+                    onClick={() => handleDelete(doc.id)}
+                    className="text-text-dim hover:text-red-400 text-xs transition-colors p-1 cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

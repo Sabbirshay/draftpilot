@@ -1,22 +1,48 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
+import { supabase } from '@/lib/supabase';
 
 export default function BillingManager() {
-  const [seats, setSeats] = useState(5);
-  const [isAnnual, setIsAnnual] = useState(false);
+  const { dbUser, user } = useAuth();
+  const [draftsCount, setDraftsCount] = useState(0);
   const [isLoadingPortal, setIsLoadingPortal] = useState(false);
+  const [selectedSeats, setSelectedSeats] = useState(1);
+  const [isAnnual, setIsAnnual] = useState(false);
 
+  const teamPlan = dbUser?.teams?.plan || 'free';
+  const isFreePlan = teamPlan === 'free';
   const pricePerSeat = isAnnual ? 15 : 19;
-  const monthlyTotal = seats * pricePerSeat;
-  const draftQuota = seats * 1000;
-  const usedDrafts = 2840;
-  const quotaPercent = Math.round((usedDrafts / draftQuota) * 100);
+  const draftQuota = isFreePlan ? 50 : selectedSeats * 1000;
+  const quotaPercent = Math.min(100, Math.round((draftsCount / draftQuota) * 100));
+
+  useEffect(() => {
+    async function fetchUsage() {
+      const teamId = dbUser?.team_id || user?.id;
+      if (!teamId) return;
+
+      try {
+        const { count } = await supabase
+          .from('draft_history')
+          .select('*', { count: 'exact', head: true })
+          .eq('team_id', teamId);
+
+        if (count !== null) {
+          setDraftsCount(count);
+        }
+      } catch (err) {
+        console.warn('Could not fetch usage from Supabase:', err);
+      }
+    }
+
+    fetchUsage();
+  }, [dbUser, user]);
 
   const handleOpenPortal = () => {
     setIsLoadingPortal(true);
     setTimeout(() => {
-      alert('Stripe Customer Billing Portal: In live production, this redirects to your hosted Stripe billing management page.');
+      alert('Stripe Billing: In live production with Stripe connected, this redirects to your customer billing checkout / portal.');
       setIsLoadingPortal(false);
     }, 500);
   };
@@ -29,13 +55,15 @@ export default function BillingManager() {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/20 border border-accent/40 text-accent-light text-xs font-bold mb-3">
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-              <span>TEAM TIER ACTIVE</span>
+              <span>{isFreePlan ? 'FREE TIER ACTIVE' : 'TEAM TIER ACTIVE'}</span>
             </div>
             <h2 className="text-3xl font-extrabold text-text font-mono">
-              ${monthlyTotal} <span className="text-sm font-normal text-text-muted">/month</span>
+              {isFreePlan ? '$0' : `$${selectedSeats * pricePerSeat}`} <span className="text-sm font-normal text-text-muted">/month</span>
             </h2>
             <p className="text-xs text-text-muted mt-1">
-              Flat ${pricePerSeat}/agent/month • {seats} Allocated Agent Seats • Next billing date: Sept 1, 2026
+              {isFreePlan
+                ? '50 AI drafts/month included · 1 Active Seat · Upgrade to Team plan for unlimited macros and team seats'
+                : `Flat $${pricePerSeat}/seat/month • ${selectedSeats} Allocated Seats • Unlimited team macros`}
             </p>
           </div>
 
@@ -45,7 +73,7 @@ export default function BillingManager() {
               disabled={isLoadingPortal}
               className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_20px_rgba(124,58,237,0.4)] cursor-pointer"
             >
-              {isLoadingPortal ? 'Loading Stripe...' : 'Manage Invoices & Cards (Stripe) →'}
+              {isLoadingPortal ? 'Connecting...' : isFreePlan ? 'Upgrade to Team Plan ($19/mo) →' : 'Manage Invoices & Cards (Stripe) →'}
             </button>
           </div>
         </div>
@@ -55,83 +83,78 @@ export default function BillingManager() {
           <div className="flex justify-between items-center text-xs mb-2">
             <span className="font-semibold text-text">Monthly AI Draft Quota</span>
             <span className="font-mono text-accent-light font-bold">
-              {usedDrafts.toLocaleString()} / {draftQuota.toLocaleString()} drafts ({quotaPercent}%)
+              {draftsCount.toLocaleString()} / {draftQuota.toLocaleString()} drafts ({quotaPercent}%)
             </span>
           </div>
           <div className="h-3 w-full rounded-full bg-bg/90 overflow-hidden p-0.5 border border-border/60">
             <div
               className="h-full rounded-full bg-gradient-to-r from-accent via-accent-hover to-cyan shadow-[0_0_12px_rgba(124,58,237,0.7)] transition-all duration-500"
-              style={{ width: `${quotaPercent}%` }}
+              style={{ width: `${Math.max(2, quotaPercent)}%` }}
             />
           </div>
           <p className="text-[11px] text-text-dim mt-2">
-            Need more drafts? Adding seats automatically adds +1,000 monthly drafts with zero migration downtime.
+            {isFreePlan
+              ? 'Free plan provides 50 drafts every month. Need more? Upgrading unlocks +1,000 monthly drafts per seat.'
+              : 'Adding seats automatically adds +1,000 monthly drafts with zero migration downtime.'}
           </p>
         </div>
       </div>
 
-      {/* Adjust Seat Allocation Card */}
-      <div className="p-6 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg">
-        <h3 className="text-sm font-bold text-text mb-2">Adjust Workspace Seats</h3>
-        <p className="text-xs text-text-muted mb-6">
-          Instantly scale agent seats up or down. Changes take effect immediately and are prorated on your invoice.
-        </p>
+      {/* Pricing Calculator Card */}
+      <div className="p-6 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-text">Plan &amp; Seat Calculator</h3>
+            <p className="text-xs text-text-muted mt-0.5">
+              Scale your support co-pilot as your team grows.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className={!isAnnual ? 'text-text font-bold' : 'text-text-dim'}>Monthly</span>
+            <button
+              onClick={() => setIsAnnual(!isAnnual)}
+              className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                isAnnual ? 'bg-accent' : 'bg-elevated border border-border'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  isAnnual ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span className={isAnnual ? 'text-accent-light font-bold' : 'text-text-dim'}>
+              Annual (20% off)
+            </span>
+          </div>
+        </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6 p-4 rounded-2xl bg-bg/80 border border-border">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setSeats(Math.max(1, seats - 1))}
+              onClick={() => setSelectedSeats(Math.max(1, selectedSeats - 1))}
               className="w-9 h-9 rounded-xl bg-elevated border border-border text-text font-bold hover:bg-white/5 flex items-center justify-center cursor-pointer"
             >
               -
             </button>
             <span className="text-xl font-bold font-mono text-text w-12 text-center">
-              {seats}
+              {selectedSeats}
             </span>
             <button
-              onClick={() => setSeats(seats + 1)}
+              onClick={() => setSelectedSeats(selectedSeats + 1)}
               className="w-9 h-9 rounded-xl bg-elevated border border-border text-text font-bold hover:bg-white/5 flex items-center justify-center cursor-pointer"
             >
               +
             </button>
-            <span className="text-xs text-text-muted">Seats (${pricePerSeat} each)</span>
+            <span className="text-xs text-text-muted">Seats (${pricePerSeat}/seat/mo)</span>
           </div>
 
           <div className="text-right">
-            <p className="text-xs text-text-dim">New Monthly Total</p>
-            <p className="text-lg font-bold font-mono text-text">${seats * pricePerSeat} / mo</p>
+            <p className="text-xs text-text-dim">Calculated Total</p>
+            <p className="text-xl font-black font-mono text-accent-light">
+              ${selectedSeats * pricePerSeat} <span className="text-xs font-normal text-text-dim">/mo</span>
+            </p>
           </div>
-        </div>
-      </div>
-
-      {/* Invoice History */}
-      <div className="p-6 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg">
-        <h3 className="text-sm font-bold text-text mb-4">Past Invoices &amp; Receipts</h3>
-        <div className="divide-y divide-border/40 text-xs">
-          {[
-            { date: 'Aug 01, 2026', amount: '$95.00', status: 'Paid', invoiceId: 'INV-2026-0801' },
-            { date: 'Jul 01, 2026', amount: '$76.00', status: 'Paid', invoiceId: 'INV-2026-0701' },
-            { date: 'Jun 01, 2026', amount: '$76.00', status: 'Paid', invoiceId: 'INV-2026-0601' },
-          ].map((inv) => (
-            <div key={inv.invoiceId} className="py-3 flex items-center justify-between">
-              <div>
-                <p className="font-semibold text-text">{inv.date}</p>
-                <p className="text-[11px] text-text-dim font-mono">{inv.invoiceId}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="font-mono font-bold text-text">{inv.amount}</span>
-                <span className="px-2 py-0.5 rounded-full bg-success/20 text-success text-[10px] font-bold">
-                  {inv.status}
-                </span>
-                <button 
-                  onClick={() => alert(`Downloading PDF for ${inv.invoiceId}`)}
-                  className="text-accent hover:underline text-xs cursor-pointer"
-                >
-                  Download PDF
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </div>

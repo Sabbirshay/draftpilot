@@ -1,87 +1,88 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'Admin' | 'Agent';
-  extensionStatus: 'Paired & Active' | 'Pending Pairing';
+  role: 'Owner' | 'Admin' | 'Agent';
+  extensionStatus: 'Active' | 'Pending Pairing';
   draftsThisMonth: number;
   lastActive: string;
+  avatarUrl?: string | null;
 }
 
-const INITIAL_MEMBERS: TeamMember[] = [
-  {
-    id: '1',
-    name: 'Alex Morgan',
-    email: 'alex@company.com',
-    role: 'Admin',
-    extensionStatus: 'Paired & Active',
-    draftsThisMonth: 1120,
-    lastActive: '5 mins ago',
-  },
-  {
-    id: '2',
-    name: 'Sarah Chen',
-    email: 'sarah@company.com',
-    role: 'Agent',
-    extensionStatus: 'Paired & Active',
-    draftsThisMonth: 890,
-    lastActive: '12 mins ago',
-  },
-  {
-    id: '3',
-    name: 'Marcus Vance',
-    email: 'marcus@company.com',
-    role: 'Agent',
-    extensionStatus: 'Paired & Active',
-    draftsThisMonth: 640,
-    lastActive: '1 hour ago',
-  },
-  {
-    id: '4',
-    name: 'Elena Rostova',
-    email: 'elena@company.com',
-    role: 'Agent',
-    extensionStatus: 'Paired & Active',
-    draftsThisMonth: 190,
-    lastActive: '3 hours ago',
-  },
-];
-
 export default function TeamManager() {
-  const [members, setMembers] = useState<TeamMember[]>(INITIAL_MEMBERS);
+  const { dbUser, user } = useAuth();
+  
+  const userEmail = dbUser?.email || user?.email || 'user@company.com';
+  const fullName =
+    dbUser?.full_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    userEmail.split('@')[0];
+  const avatarUrl =
+    dbUser?.avatar_url ||
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    null;
+
+  const plan = dbUser?.teams?.plan || 'free';
+  const totalSeats = plan === 'free' ? 1 : 5;
+
+  const [invitedMembers, setInvitedMembers] = useState<TeamMember[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'Admin' | 'Agent'>('Agent');
   const [inviteSuccess, setInviteSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const totalSeats = 5;
-  const usedSeats = members.length;
+  const allMembers: TeamMember[] = [
+    {
+      id: dbUser?.id || user?.id || 'owner-1',
+      name: fullName,
+      email: userEmail,
+      role: 'Owner',
+      extensionStatus: 'Active',
+      draftsThisMonth: 0,
+      lastActive: 'Active now',
+      avatarUrl,
+    },
+    ...invitedMembers,
+  ];
+
+  const usedSeats = allMembers.length;
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
+
     if (!inviteEmail.trim()) return;
+
+    if (usedSeats >= totalSeats) {
+      setErrorMsg(`You have reached your seat limit (${totalSeats} seat on ${plan.toUpperCase()} plan). Upgrade your plan to invite additional team members.`);
+      return;
+    }
 
     const newMember: TeamMember = {
       id: String(Date.now()),
       name: inviteEmail.split('@')[0],
-      email: inviteEmail,
+      email: inviteEmail.trim(),
       role: inviteRole,
       extensionStatus: 'Pending Pairing',
       draftsThisMonth: 0,
       lastActive: 'Invited just now',
     };
 
-    setMembers([...members, newMember]);
+    setInvitedMembers([...invitedMembers, newMember]);
     setInviteEmail('');
     setInviteSuccess(true);
-    setTimeout(() => setInviteSuccess(false), 3000);
+    setTimeout(() => setInviteSuccess(false), 3500);
   };
 
   const handleRemove = (id: string) => {
-    setMembers(members.filter((m) => m.id !== id));
+    setInvitedMembers(invitedMembers.filter((m) => m.id !== id));
   };
 
   return (
@@ -102,135 +103,133 @@ export default function TeamManager() {
 
         <div className="p-5 rounded-3xl bg-elevated/70 border border-border/80 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs text-text-dim">Extension Paired</p>
-            <h3 className="text-2xl font-bold text-emerald-400 font-mono mt-1">
-              {members.filter((m) => m.extensionStatus === 'Paired & Active').length} Active
+            <p className="text-xs text-text-dim">Current Plan</p>
+            <h3 className="text-2xl font-bold text-text font-mono mt-1 capitalize">
+              {plan} Tier
             </h3>
           </div>
           <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-sm font-bold">
-            🟢
+            ✓
           </div>
         </div>
 
         <div className="p-5 rounded-3xl bg-elevated/70 border border-border/80 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs text-text-dim">Seat Cost</p>
+            <p className="text-xs text-text-dim">Shared Knowledge Base</p>
             <h3 className="text-2xl font-bold text-text font-mono mt-1">
-              $19 <span className="text-xs text-text-muted font-normal">/agent/mo</span>
+              Synced
             </h3>
           </div>
           <div className="w-10 h-10 rounded-full bg-cyan/20 border border-cyan/40 flex items-center justify-center text-cyan text-sm font-bold">
-            💳
+            ⚡
           </div>
         </div>
       </div>
 
-      {/* Invite new agent bar */}
-      <div className="p-5 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg">
-        <h3 className="text-sm font-bold text-text mb-3">Invite Team Member to Workspace</h3>
-        <form onSubmit={handleInvite} className="flex flex-col sm:flex-row items-center gap-3">
+      {/* Invite Team Member Box */}
+      <div className="p-6 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg">
+        <h3 className="text-sm font-bold text-text mb-1">Invite Team Member</h3>
+        <p className="text-xs text-text-muted mb-4">
+          Add support agents to your workspace so they can access team macros and draft replies in Gmail.
+        </p>
+
+        <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <input
             type="email"
-            required
-            placeholder="colleague@company.com"
+            placeholder="agent@yourcompany.com"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
-            className="flex-1 w-full px-4 py-2.5 rounded-xl bg-bg border border-border text-xs text-text outline-none focus:border-accent"
+            className="flex-1 px-4 py-2.5 rounded-xl bg-bg border border-border focus:border-accent text-xs text-text placeholder-text-dim outline-none transition-all"
           />
           <select
             value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value as any)}
-            className="px-3 py-2.5 rounded-xl bg-bg border border-border text-xs text-text outline-none focus:border-accent"
+            onChange={(e) => setInviteRole(e.target.value as 'Admin' | 'Agent')}
+            className="px-3.5 py-2.5 rounded-xl bg-bg border border-border focus:border-accent text-xs text-text outline-none"
           >
             <option value="Agent">Support Agent</option>
-            <option value="Admin">Workspace Admin</option>
+            <option value="Admin">Admin</option>
           </select>
           <button
             type="submit"
-            disabled={usedSeats >= totalSeats}
-            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] disabled:opacity-50 cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer shrink-0"
           >
-            {usedSeats >= totalSeats ? 'Seats Full (Upgrade)' : '+ Send Invite'}
+            Send Invite
           </button>
         </form>
 
         {inviteSuccess && (
-          <p className="text-xs text-success mt-2 flex items-center gap-1">
-            ✓ Invitation link sent to colleague with pairing instructions!
+          <p className="text-xs text-emerald-400 mt-2 font-medium">
+            ✓ Invitation link generated and queued for delivery!
+          </p>
+        )}
+
+        {errorMsg && (
+          <p className="text-xs text-amber-400 mt-2 font-medium">
+            ⚠️ {errorMsg}
           </p>
         )}
       </div>
 
-      {/* Members table */}
-      <div className="rounded-3xl bg-elevated/70 border border-border/80 overflow-hidden shadow-lg">
-        <div className="p-5 border-b border-border/40 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-text">Active Team Roster</h3>
-          <span className="text-xs text-text-dim">{members.length} members listed</span>
+      {/* Team Members Roster */}
+      <div className="rounded-3xl bg-elevated/70 border border-border/80 shadow-lg overflow-hidden">
+        <div className="p-5 border-b border-border/50 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-text">Active Team Members ({allMembers.length})</h3>
+          <span className="text-[11px] text-text-dim">Auto-synced with workspace</span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-bg/50 text-text-dim uppercase text-[10px] tracking-wider border-b border-border/40">
-              <tr>
-                <th className="px-6 py-3 font-semibold">Agent / User</th>
-                <th className="px-6 py-3 font-semibold">Role</th>
-                <th className="px-6 py-3 font-semibold">Gmail Extension</th>
-                <th className="px-6 py-3 font-semibold">Drafts (This Mo)</th>
-                <th className="px-6 py-3 font-semibold">Last Active</th>
-                <th className="px-6 py-3 font-semibold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {members.map((member) => (
-                <tr key={member.id} className="hover:bg-white/5 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center font-bold text-accent-light text-xs">
-                        {member.name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-text">{member.name}</p>
-                        <p className="text-[11px] text-text-dim">{member.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-0.5 rounded-full bg-bg border border-border text-[11px] font-mono text-text-muted">
+        <div className="divide-y divide-border/40">
+          {allMembers.map((member) => (
+            <div key={member.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-3.5">
+                {member.avatarUrl ? (
+                  <img
+                    src={member.avatarUrl}
+                    alt={member.name}
+                    className="w-10 h-10 rounded-full object-cover border border-border shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-accent to-cyan flex items-center justify-center text-xs font-bold text-white shadow-sm shrink-0">
+                    {member.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-text">{member.name}</h4>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium ${
+                      member.role === 'Owner'
+                        ? 'bg-accent/20 text-accent-light'
+                        : 'bg-elevated border border-border text-text-dim'
+                    }`}>
                       {member.role}
                     </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${
-                      member.extensionStatus === 'Paired & Active'
-                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                        : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        member.extensionStatus === 'Paired & Active' ? 'bg-emerald-400' : 'bg-yellow-400'
-                      }`} />
-                      <span>{member.extensionStatus}</span>
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 font-mono text-text-muted">
-                    {member.draftsThisMonth} drafts
-                  </td>
-                  <td className="px-6 py-4 text-text-dim">
-                    {member.lastActive}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {member.role !== 'Admin' && (
-                      <button
-                        onClick={() => handleRemove(member.id)}
-                        className="text-red-400 hover:text-red-300 font-medium text-xs cursor-pointer"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <p className="text-[11px] text-text-dim mt-0.5">{member.email}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between sm:justify-end gap-6 text-xs">
+                <div className="text-left sm:text-right">
+                  <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${
+                    member.extensionStatus === 'Active' ? 'text-emerald-400' : 'text-amber-400'
+                  }`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                    {member.extensionStatus}
+                  </span>
+                  <p className="text-[10px] text-text-dim mt-0.5">{member.lastActive}</p>
+                </div>
+
+                {member.role !== 'Owner' && (
+                  <button
+                    onClick={() => handleRemove(member.id)}
+                    className="text-text-dim hover:text-red-400 text-xs transition-colors p-1 cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

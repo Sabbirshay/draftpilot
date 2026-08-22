@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 export default function GmailSyncManager() {
-  const [apiKey, setApiKey] = useState('dp_live_sec_89f3a928c04e712a8b');
+  const { dbUser, user } = useAuth();
+  const teamId = dbUser?.team_id || user?.id || 'team';
+  const apiKey = `dp_live_${teamId.replace(/-/g, '').slice(0, 20)}`;
   const [copied, setCopied] = useState(false);
   const [scrubCards, setScrubCards] = useState(true);
   const [scrubPhones, setScrubPhones] = useState(true);

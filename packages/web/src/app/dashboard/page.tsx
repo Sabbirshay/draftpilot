@@ -122,7 +122,12 @@ export default function DashboardPage() {
 
         {/* Tab Content Display */}
         <div>
-          {activeTab === 'overview' && <OverviewBento dateRange={dateRange} />}
+          {activeTab === 'overview' && (
+            <OverviewBento
+              dateRange={dateRange}
+              onNavigateToMacros={() => setActiveTab('macros')}
+            />
+          )}
           {activeTab === 'macros' && <MacrosManager />}
           {activeTab === 'team' && <TeamManager />}
           {activeTab === 'billing' && <BillingManager />}

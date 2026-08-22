@@ -8,9 +8,10 @@ import { supabase } from '@/lib/supabase';
 
 interface OverviewBentoProps {
   dateRange?: DateRangeState;
+  onNavigateToMacros?: () => void;
 }
 
-export default function OverviewBento({ dateRange }: OverviewBentoProps) {
+export default function OverviewBento({ dateRange, onNavigateToMacros }: OverviewBentoProps) {
   const { dbUser, user } = useAuth();
   const [draftsCount, setDraftsCount] = useState<number>(0);
   const [macrosCount, setMacrosCount] = useState<number>(0);
@@ -273,7 +274,12 @@ export default function OverviewBento({ dateRange }: OverviewBentoProps) {
 
         <div className="pt-3 border-t border-border/40 text-[11px] text-text-dim flex items-center justify-between mt-2">
           <span>Synced with {macrosCount} team macros</span>
-          <span className="text-accent font-semibold hover:underline cursor-pointer">Manage KB →</span>
+          <button
+            onClick={onNavigateToMacros}
+            className="text-accent font-semibold hover:underline cursor-pointer bg-transparent border-none p-0 text-[11px]"
+          >
+            Manage KB →
+          </button>
         </div>
       </div>
 
