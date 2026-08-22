@@ -61,7 +61,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
 
       if (mode === 'signup') {
         // Sign up via Supabase Auth directly
-        const { error } = await supabase.auth.signUp({
+        const { data: signUpData, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -77,7 +77,18 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
 
         if (error) throw error;
 
-        setSuccessMessage('Account created! Check your email to confirm, or sign in now.');
+        if (signUpData.session) {
+          // Instant session available — auto redirect to onboarding dashboard
+          setSuccessMessage('Account created! Setting up your dashboard...');
+          setTimeout(() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/dashboard';
+            }
+          }, 800);
+        } else {
+          // Email confirmation is required by Supabase
+          setSuccessMessage('Account created! If email confirmation is enabled in your Supabase project, please check your inbox (and spam) to confirm your email before signing in.');
+        }
       } else {
         // Sign in
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -85,20 +96,14 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
           password,
         });
 
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes('invalid login credentials')) {
+            throw new Error('Invalid email or password. (If you just signed up, please check your email inbox to confirm your email address, or disable "Confirm email" in Supabase settings).');
+          }
+          throw error;
+        }
 
         if (data.session) {
-          // Provision user in our DB
-          try {
-            const { provisionUser } = await import('@/lib/api');
-            const result = await provisionUser(data.session.access_token);
-            localStorage.setItem('draftpilot_token', data.session.access_token);
-            localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
-          } catch {
-            // API might not be running — still proceed with session
-            localStorage.setItem('draftpilot_token', data.session.access_token);
-          }
-
           setSuccessMessage('Signed in successfully! Redirecting...');
           setTimeout(() => {
             if (typeof window !== 'undefined') {
