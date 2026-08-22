@@ -376,27 +376,44 @@ export default function OnboardingDashboard({
               </div>
 
               <div className="space-y-4 text-xs">
-                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2">
-                  <p className="font-semibold text-text flex items-center gap-1.5">
-                    <span>⚡</span>
-                    <span>Option 1: Load in Chrome (Instant Testing)</span>
-                  </p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-text-muted text-[11px] pl-1 leading-relaxed">
-                    <li>Open Chrome and navigate to <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">chrome://extensions</code></li>
-                    <li>Toggle ON <strong>Developer mode</strong> in the top-right corner</li>
-                    <li>Click <strong>Load unpacked</strong></li>
-                    <li>Select the folder: <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">packages/extension/dist</code></li>
-                  </ol>
+                {/* 1-Click Download Button */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-accent/15 to-cyan/15 border border-accent/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-text text-sm">Download Extension (.zip)</p>
+                      <p className="text-text-muted text-[11px]">Free direct download · No Chrome Web Store fee needed</p>
+                    </div>
+                    <a
+                      href="/draftpilot-extension.zip"
+                      download="draftpilot-extension.zip"
+                      className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>⬇️</span>
+                      <span>Download .ZIP</span>
+                    </a>
+                  </div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2">
+                {/* 30-Second Quick Setup Guide */}
+                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2.5">
                   <p className="font-semibold text-text flex items-center gap-1.5">
-                    <span>🌐</span>
-                    <span>Option 2: Chrome Web Store</span>
+                    <span>⚡</span>
+                    <span>How to Install in 30 Seconds (100% Free):</span>
                   </p>
-                  <p className="text-[11px] text-text-muted leading-relaxed">
-                    Package <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">draftpilot-chrome-extension-v0.1.0.zip</code> is generated and ready to upload to the Chrome Developer Dashboard.
-                  </p>
+                  <ol className="list-decimal list-inside space-y-2 text-text-muted text-[11px] pl-1 leading-relaxed">
+                    <li>
+                      <strong>Download and extract</strong> the <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">draftpilot-extension.zip</code> file on your computer.
+                    </li>
+                    <li>
+                      Open Google Chrome and go to <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">chrome://extensions</code>.
+                    </li>
+                    <li>
+                      In the top-right corner, toggle ON <strong>Developer mode</strong>.
+                    </li>
+                    <li>
+                      Click the <strong>Load unpacked</strong> button in the top-left and select the extracted folder.
+                    </li>
+                  </ol>
                 </div>
               </div>
 
@@ -410,7 +427,7 @@ export default function OnboardingDashboard({
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer text-center"
                 >
-                  ✓ Mark as Installed &amp; Enter Dashboard
+                  ✓ Done! I Installed the Extension → Enter Dashboard
                 </button>
               </div>
             </motion.div>
