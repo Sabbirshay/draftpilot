@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
+  // Native Vercel optimization
+  ...(process.env.VERCEL ? {} : { output: 'standalone' }),
 };
 
 module.exports = nextConfig;
