@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import DateRangePicker, { DateRangeState } from './DateRangePicker';
 import NotificationCenter from './NotificationCenter';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 export type DashboardTab = 'overview' | 'macros' | 'team' | 'billing' | 'gmail';
 
@@ -22,32 +23,15 @@ export default function DashboardHeader({
   dateRange,
   onDateRangeChange,
 }: DashboardHeaderProps) {
-  const [userEmail, setUserEmail] = useState('agent@company.com');
-  const [teamName, setTeamName] = useState('Acme Support Ops');
+  const { dbUser, signOut } = useAuth();
+  const userEmail = dbUser?.email || 'agent@company.com';
+  const teamName = dbUser?.teams?.name || 'My Team';
+  const fullName = dbUser?.full_name || userEmail.split('@')[0];
+  const avatarUrl = dbUser?.avatar_url || null;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(3);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedUser = localStorage.getItem('draftpilot_user');
-      if (storedUser) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          if (parsed.email) setUserEmail(parsed.email);
-          if (parsed.teams?.name) setTeamName(parsed.teams.name);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }, []);
-
-  const handleLogout = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('draftpilot_token');
-      localStorage.removeItem('draftpilot_user');
-      window.location.href = '/login';
-    }
+  const handleLogout = async () => {
+    await signOut();
   };
 
   return (
@@ -140,16 +124,25 @@ export default function DashboardHeader({
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               className="flex items-center gap-2 p-1 rounded-full bg-elevated/80 border border-border hover:border-accent/50 transition-all cursor-pointer"
             >
-              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-accent to-cyan flex items-center justify-center text-xs font-bold text-white shadow-sm">
-                {userEmail.charAt(0).toUpperCase()}
-              </div>
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={fullName}
+                  className="w-7 h-7 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-accent to-cyan flex items-center justify-center text-xs font-bold text-white shadow-sm">
+                  {(fullName || userEmail).charAt(0).toUpperCase()}
+                </div>
+              )}
             </button>
 
             {isProfileMenuOpen && (
               <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-bg-card border border-border shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
                 <div className="px-3 py-2 border-b border-border/50 mb-1">
-                  <p className="text-xs font-bold text-text truncate">{teamName}</p>
-                  <p className="text-[11px] text-text-dim truncate">{userEmail}</p>
+                  <p className="text-xs font-bold text-text truncate">{fullName}</p>
+                  <p className="text-[11px] text-text-dim truncate">{teamName} · {userEmail}</p>
                 </div>
                 <button
                   onClick={() => { onTabChange('team'); setIsProfileMenuOpen(false); }}

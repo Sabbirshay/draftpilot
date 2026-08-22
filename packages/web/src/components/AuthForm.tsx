@@ -17,61 +17,98 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      // Dynamic import to avoid SSR issues
+      const { supabase } = await import('@/lib/supabase');
+      const redirectUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/auth/callback`
+        : undefined;
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) throw error;
+      // Browser will redirect to Google — no further action needed
+    } catch (err: any) {
+      setGoogleLoading(false);
+      setError(err.message || 'Failed to start Google sign in');
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
     setLoading(true);
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    const endpoint = mode === 'signin' ? `${apiUrl}/auth/login` : `${apiUrl}/auth/register`;
-    const payload = mode === 'signin' 
-      ? { email, password } 
-      : { email, password, teamName: teamName || `${email.split('@')[0]}'s Team` };
-
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const { supabase } = await import('@/lib/supabase');
 
-      const data = await res.json();
+      if (mode === 'signup') {
+        // Sign up via Supabase Auth directly
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: teamName ? teamName.split("'")[0] : email.split('@')[0],
+              team_name: teamName || `${email.split('@')[0]}'s Team`,
+            },
+            emailRedirectTo: typeof window !== 'undefined'
+              ? `${window.location.origin}/auth/callback`
+              : undefined,
+          },
+        });
 
-      if (!res.ok) {
-        throw new Error(data.message || (mode === 'signin' ? 'Failed to sign in' : 'Failed to create account'));
-      }
+        if (error) throw error;
 
-      // Store auth state locally
-      if (typeof window !== 'undefined') {
-        if (data.accessToken) {
-          localStorage.setItem('draftpilot_token', data.accessToken);
-          localStorage.setItem('draftpilot_user', JSON.stringify(data.user));
-        }
-      }
-
-      setSuccessMessage(mode === 'signin' ? 'Signed in successfully! Redirecting...' : 'Account created! Welcome to DraftPilot.');
-      setTimeout(() => {
-        if (typeof window !== 'undefined') {
-          window.location.href = '/dashboard';
-        }
-      }, 1200);
-    } catch (err: any) {
-      // If backend is in test/dev mode without live Supabase configured, provide intuitive feedback
-      if (err.message?.includes('fetch failed') || err.message?.includes('NetworkError') || err.message?.includes('Failed to fetch')) {
-        // Fallback for live demo experience
-        setSuccessMessage(`Demo Auth: Signed in as ${email}. Redirecting to dashboard...`);
-        setTimeout(() => {
-          if (typeof window !== 'undefined') {
-            window.location.href = '/dashboard';
-          }
-        }, 1200);
+        setSuccessMessage('Account created! Check your email to confirm, or sign in now.');
       } else {
-        setError(err.message || 'An error occurred during authentication');
+        // Sign in
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+
+        if (data.session) {
+          // Provision user in our DB
+          try {
+            const { provisionUser } = await import('@/lib/api');
+            const result = await provisionUser(data.session.access_token);
+            localStorage.setItem('draftpilot_token', data.session.access_token);
+            localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
+          } catch {
+            // API might not be running — still proceed with session
+            localStorage.setItem('draftpilot_token', data.session.access_token);
+          }
+
+          setSuccessMessage('Signed in successfully! Redirecting...');
+          setTimeout(() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/dashboard';
+            }
+          }, 800);
+        }
       }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred during authentication');
     } finally {
       setLoading(false);
     }
@@ -142,8 +179,50 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
               )}
             </AnimatePresence>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {/* ========== GOOGLE OAUTH — PRIMARY CTA ========== */}
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={googleLoading}
+              className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-gray-100 text-gray-800 text-sm font-semibold transition-all flex items-center justify-center gap-3 shadow-[0_2px_12px_rgba(0,0,0,0.15)] disabled:opacity-60 cursor-pointer mb-6"
+            >
+              {googleLoading ? (
+                <svg className="animate-spin w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.27 21.36 7.34 24 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.98 0 12s.46 3.84 1.26 5.42l4.02-3.15z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.27 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                  />
+                </svg>
+              )}
+              <span>Continue with Google</span>
+            </button>
+
+            {/* ========== DIVIDER ========== */}
+            <div className="flex items-center gap-3 mb-6">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[11px] text-text-dim font-medium uppercase tracking-wider">or continue with email</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            {/* ========== EMAIL/PASSWORD — SECONDARY ========== */}
+            <form onSubmit={handleEmailSubmit} className="space-y-3.5">
               {mode === 'signup' && (
                 <div>
                   <label className="block text-xs font-semibold text-text mb-1.5" htmlFor="teamName">
@@ -152,7 +231,6 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                   <input
                     id="teamName"
                     type="text"
-                    required
                     placeholder="e.g. Acme Support Ops"
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
@@ -185,6 +263,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
+                    minLength={6}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -201,7 +280,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
               </div>
 
               {/* Options Row */}
-              <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center justify-between pt-0.5">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -227,7 +306,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold shadow-[0_0_25px_rgba(124,58,237,0.4)] hover:shadow-[0_0_35px_rgba(124,58,237,0.6)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2 cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-xl bg-accent/90 hover:bg-accent text-white text-xs font-bold shadow-sm hover:shadow-[0_0_20px_rgba(124,58,237,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 cursor-pointer"
               >
                 {loading && (
                   <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24">
@@ -235,40 +314,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
                 )}
-                <span>{loading ? 'Please wait...' : mode === 'signin' ? 'Sign in' : 'Create account'}</span>
-              </button>
-
-              {/* Google Sign In Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSuccessMessage('Signing in with Google OAuth...');
-                  setTimeout(() => {
-                    if (typeof window !== 'undefined') window.location.href = '/dashboard';
-                  }, 1000);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-elevated hover:bg-elevated/80 border border-border text-text text-xs font-semibold transition-all flex items-center justify-center gap-2.5 shadow-sm mt-3 cursor-pointer"
-              >
-                {/* Official Google 'G' icon */}
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.27 21.36 7.34 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.98 0 12s.46 3.84 1.26 5.42l4.02-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.27 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-                <span>Sign in with Google</span>
+                <span>{loading ? 'Please wait...' : mode === 'signin' ? 'Sign in with email' : 'Create account with email'}</span>
               </button>
             </form>
 
@@ -276,7 +322,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
             <div className="mt-6 text-center text-xs text-text-muted">
               {mode === 'signin' ? (
                 <>
-                  Don't have an account?{' '}
+                  Don&apos;t have an account?{' '}
                   <button
                     type="button"
                     onClick={() => {
@@ -358,7 +404,7 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
             </div>
 
             <p className="text-xs text-text-muted leading-relaxed font-normal">
-              "Draft delightful, human replies 5× faster — right inside your Gmail inbox."
+              &quot;Draft delightful, human replies 5× faster — right inside your Gmail inbox.&quot;
             </p>
 
             <div className="pt-2 flex items-center justify-center gap-1.5 text-[11px] text-text-dim">

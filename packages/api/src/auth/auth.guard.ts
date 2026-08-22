@@ -24,7 +24,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid token');
     }
 
-    // Fetch user details from our DB
+    // Fetch user with team and onboarding state
     const { data: dbUser, error: dbError } = await this.supabase.getClient()
       .from('users')
       .select('*, teams(*)')
@@ -32,7 +32,7 @@ export class AuthGuard implements CanActivate {
       .single();
 
     if (dbError || !dbUser) {
-      throw new UnauthorizedException('User not found in DB');
+      throw new UnauthorizedException('User not found in database');
     }
 
     request.user = dbUser;
