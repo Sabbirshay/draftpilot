@@ -3,7 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "description": "AI-powered support reply co-pilot — Chrome extension for small support teams",
-  "packageManager": "pnpm@9.1.0",
   "scripts": {
     "dev": "pnpm --filter @draftpilot/web dev",
     "build": "pnpm --filter @draftpilot/web build",
@@ -16,20 +15,5 @@
     "build:ext": "pnpm --filter @draftpilot/extension build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint"
-  },
-  "dependencies": {
-    "next": "^14.2.35",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "framer-motion": "^11.0.0",
-    "motion": "^13.1.1"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/react": "^18.2.0",
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.31",
-    "tailwindcss": "^3.3.0",
-    "typescript": "^5.0.0"
   }
 }
