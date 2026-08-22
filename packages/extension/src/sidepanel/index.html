@@ -49,7 +49,7 @@
 
       <div class="usage-badge" id="usage-container">
         <div class="usage-text">
-          <span id="usage-count">0/0</span> drafts this month
+          <span id="usage-count">0/50</span> drafts this month
         </div>
         <div class="progress-bar">
           <div class="progress-fill" id="usage-progress" style="width: 0%"></div>
@@ -65,19 +65,25 @@
       <div class="tab-content">
         <!-- Draft Tab -->
         <div id="tab-draft" class="tab-pane active">
-          <div id="thread-status" class="status-box waiting">
-            Waiting for Gmail reply...
+          <div class="flex-between">
+            <div id="thread-status" class="status-box waiting flex-1">
+              Scanning open Gmail email...
+            </div>
+            <button id="scan-email-btn" class="btn btn-ghost btn-sm ml-2" title="Scan Open Email" style="padding: 4px 8px; font-size: 11px;">🔄 Scan</button>
           </div>
-          <div id="thread-preview" class="hidden"></div>
+          <div id="thread-preview" class="hidden mt-2" style="font-size: 11px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); max-height: 80px; overflow-y: auto;"></div>
           
           <div class="form-group mt-3">
-            <input type="text" id="macro-hint" placeholder="Optional instruction (e.g. 'Use refund macro')">
+            <input type="text" id="macro-hint" placeholder="Optional instruction (e.g. 'Use refund policy')">
           </div>
 
-          <button id="generate-btn" class="btn btn-primary btn-block mt-3" disabled>Generate Draft</button>
+          <button id="generate-btn" class="btn btn-primary btn-block mt-3">Generate AI Draft</button>
           
           <div id="draft-result-container" class="hidden mt-4">
-            <h4>Generated Draft</h4>
+            <div class="flex-between mb-2">
+              <h4 style="margin: 0; font-size: 13px;">Generated AI Reply</h4>
+              <span id="draft-macro-badge" class="badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(124,58,237,0.2); color: #a78bfa;">AI Draft</span>
+            </div>
             <div id="draft-content" class="draft-box"></div>
             
             <div class="action-buttons mt-3">
@@ -89,21 +95,21 @@
 
         <!-- Macros Tab -->
         <div id="tab-macros" class="tab-pane hidden">
-          <button id="show-add-macro-btn" class="btn btn-secondary btn-block mb-3">Add Macro</button>
+          <button id="show-add-macro-btn" class="btn btn-secondary btn-block mb-3">+ Add Custom Macro</button>
           
           <form id="add-macro-form" class="hidden form-card mb-4">
-            <input type="text" id="macro-name" placeholder="Macro Name" required>
-            <textarea id="macro-content" placeholder="Content (Hi {{name}}, ...)" rows="4" required></textarea>
-            <input type="text" id="macro-tags" placeholder="Tags (comma separated)">
-            <div class="row">
-              <button type="submit" class="btn btn-primary btn-sm flex-1">Save</button>
+            <input type="text" id="macro-name" placeholder="Macro Name (e.g. Refund Policy)" required>
+            <textarea id="macro-content" placeholder="Content: Hi {{name}}, ..." rows="4" required></textarea>
+            <input type="text" id="macro-tags" placeholder="Tags (comma separated: refund, return)">
+            <div class="row mt-2" style="display: flex; gap: 8px;">
+              <button type="submit" class="btn btn-primary btn-sm flex-1">Save Macro</button>
               <button type="button" id="cancel-macro-btn" class="btn btn-ghost btn-sm flex-1">Cancel</button>
             </div>
           </form>
 
           <div id="macros-list"></div>
           <div id="macros-empty" class="hidden text-center text-muted mt-4">
-            Add your first macro — paste your team's canned responses here
+            No macros in your knowledge base yet. Add your first macro above.
           </div>
         </div>
 
@@ -111,19 +117,14 @@
         <div id="tab-settings" class="tab-pane hidden">
           <div class="card">
             <h4>Account</h4>
-            <p class="text-sm">Team: <strong id="settings-team"></strong></p>
-            <p class="text-sm">Plan: <strong id="settings-plan"></strong></p>
+            <p class="text-sm">Team: <strong id="settings-team">Loading...</strong></p>
+            <p class="text-sm">Plan: <strong id="settings-plan">Free</strong></p>
           </div>
 
           <div class="card mt-3">
-            <h4>Billing</h4>
-            <button id="billing-btn" class="btn btn-secondary btn-block mt-2">Manage Billing</button>
-          </div>
-          
-          <div class="card mt-3">
-            <h4>Developer</h4>
-            <input type="text" id="api-url" placeholder="API URL (http://localhost:3001)">
-            <button id="save-api-url" class="btn btn-ghost btn-sm mt-2">Save URL</button>
+            <h4>Workspace Dashboard</h4>
+            <p class="text-xs text-muted mb-2">Open the web dashboard to manage your full knowledge base, team seats, and invoices.</p>
+            <button id="billing-btn" class="btn btn-secondary btn-block">Open Web Dashboard →</button>
           </div>
         </div>
       </div>

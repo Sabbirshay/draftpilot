@@ -3,17 +3,17 @@ import { scrubPII } from '../utils/pii-scrubber';
 class GmailDetector {
   private composeBox: HTMLElement | null = null;
   private observer: MutationObserver | null = null;
+  private lastDetectedText: string = '';
 
   constructor() {
     this.initObserver();
     this.listenForMessages();
+    this.startPeriodicScan();
   }
 
   private initObserver() {
-    // Observe DOM mutations to detect when a compose/reply box appears
     this.observer = new MutationObserver(() => {
-      // Use requestAnimationFrame to batch DOM reads
-      requestAnimationFrame(() => this.checkForCompose());
+      requestAnimationFrame(() => this.checkForEmailAndCompose());
     });
 
     this.observer.observe(document.body, {
@@ -22,82 +22,149 @@ class GmailDetector {
     });
   }
 
-  private checkForCompose() {
-    // Look for Gmail's compose area
-    const newComposeBox = document.querySelector('div[role="textbox"][g_editable="true"], div[role="textbox"][aria-label*="Message Body"]') as HTMLElement;
-    
-    if (newComposeBox && newComposeBox !== this.composeBox) {
-      this.composeBox = newComposeBox;
-      this.handleComposeDetected();
-    } else if (!newComposeBox && this.composeBox) {
-      this.composeBox = null;
-    }
+  private startPeriodicScan() {
+    // Initial scan
+    setTimeout(() => this.checkForEmailAndCompose(), 500);
+    setTimeout(() => this.checkForEmailAndCompose(), 1500);
+
+    // Periodic check every 2 seconds
+    setInterval(() => {
+      this.checkForEmailAndCompose();
+    }, 2000);
+
+    // Also check on click or keyup in Gmail
+    document.addEventListener('click', () => {
+      setTimeout(() => this.checkForEmailAndCompose(), 300);
+    });
   }
 
-  private handleComposeDetected() {
-    // Try to extract thread text
+  private findComposeBox(): HTMLElement | null {
+    const selectors = [
+      'div[role="textbox"][contenteditable="true"]',
+      'div[role="textbox"][g_editable="true"]',
+      'div[role="textbox"][aria-label*="Message Body"]',
+      'div[role="textbox"][aria-label*="Reply"]',
+      'div[role="textbox"][aria-label*="Body"]',
+      'div.Am.Al.editable',
+      'div.editable[contenteditable="true"]',
+      'div[g_editable="true"]',
+    ];
+
+    for (const sel of selectors) {
+      const el = document.querySelector(sel) as HTMLElement;
+      if (el && el.offsetParent !== null) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  private extractThreadText(): string {
+    let result = '';
+
+    // 1. Extract Email Subject
+    const subjectEl = document.querySelector('h2.hP, h2[data-thread-perm-id], h2[data-legacy-thread-id]');
+    if (subjectEl && subjectEl.textContent) {
+      result += `Subject: ${subjectEl.textContent.trim()}\n\n`;
+    }
+
+    // 2. Extract Senders and Message Bodies
+    const messageBodies = document.querySelectorAll('.a3s.aiL, .a3s, .ii.gt, div[data-message-id]');
+    const compose = this.findComposeBox();
+
+    if (messageBodies.length > 0) {
+      messageBodies.forEach((body) => {
+        if (!compose || !compose.contains(body)) {
+          const text = (body as HTMLElement).innerText?.trim();
+          if (text && text.length > 10) {
+            result += text + '\n\n';
+          }
+        }
+      });
+    }
+
+    // 3. Fallback: Check email view main container
+    if (!result.trim()) {
+      const mainContainer = document.querySelector('div[role="main"]');
+      if (mainContainer) {
+        const text = (mainContainer as HTMLElement).innerText;
+        if (text && text.length > 30) {
+          result = text.slice(0, 2000);
+        }
+      }
+    }
+
+    return result.trim();
+  }
+
+  private checkForEmailAndCompose() {
+    const compose = this.findComposeBox();
     const threadText = this.extractThreadText();
-    if (threadText) {
-      const scrubbedText = scrubPII(threadText);
+
+    if (compose) {
+      this.composeBox = compose;
+    }
+
+    if (threadText && threadText !== this.lastDetectedText) {
+      this.lastDetectedText = threadText;
+      const scrubbed = scrubPII(threadText);
+
       chrome.runtime.sendMessage({
         type: 'THREAD_DETECTED',
-        text: scrubbedText
+        text: scrubbed,
+        hasCompose: !!compose,
       }).catch(() => {
-        // Ignore if extension context invalidated or background not ready
+        // Ignore context errors
       });
     }
   }
 
-  private extractThreadText(): string {
-    // Find all message bodies in the current view
-    const messageBodies = document.querySelectorAll('.a3s.aiL');
-    if (!messageBodies.length) return '';
-
-    let text = '';
-    messageBodies.forEach(body => {
-      // Exclude the current compose box if it's inside
-      if (!this.composeBox || !this.composeBox.contains(body)) {
-        text += (body as HTMLElement).innerText + '\n\n';
-      }
-    });
-    
-    return text.trim();
-  }
-
   private listenForMessages() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === 'INSERT_DRAFT') {
-        this.insertDraft(message.draft);
-        sendResponse({ success: true });
+      if (message.type === 'GET_THREAD_CONTENT' || message.type === 'POLL_THREAD') {
+        const text = this.extractThreadText();
+        const compose = this.findComposeBox();
+        if (compose) this.composeBox = compose;
+
+        sendResponse({
+          text: text ? scrubPII(text) : '',
+          hasCompose: !!compose,
+        });
+      } else if (message.type === 'INSERT_DRAFT') {
+        const success = this.insertDraft(message.draft);
+        sendResponse({ success });
       }
       return true;
     });
   }
 
-  private insertDraft(draft: string) {
-    if (!this.composeBox) {
-      // Try to find it again just in case
-      this.composeBox = document.querySelector('div[role="textbox"][g_editable="true"], div[role="textbox"][aria-label*="Message Body"]') as HTMLElement;
+  private insertDraft(draft: string): boolean {
+    let target = this.composeBox || this.findComposeBox();
+
+    if (!target) {
+      // Try to find any visible compose container
+      target = document.querySelector('div[role="textbox"]') as HTMLElement;
     }
 
-    if (this.composeBox) {
-      // Replace newlines with <br> for contenteditable
+    if (target) {
+      target.focus();
       const htmlContent = draft.replace(/\n/g, '<br>');
-      
-      // Focus first to ensure it's active
-      this.composeBox.focus();
-      
-      // Use execCommand to preserve undo stack if possible, otherwise innerHTML
-      if (!document.execCommand('insertHTML', false, htmlContent)) {
-        this.composeBox.innerHTML += htmlContent;
+
+      try {
+        if (!document.execCommand('insertHTML', false, htmlContent)) {
+          target.innerHTML = htmlContent;
+        }
+      } catch {
+        target.innerHTML = htmlContent;
       }
 
-      // Dispatch events to notify Gmail's internal state
-      this.composeBox.dispatchEvent(new Event('input', { bubbles: true }));
-      this.composeBox.dispatchEvent(new Event('change', { bubbles: true }));
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
     }
+    return false;
   }
 }
 
-// Initialize when the script runs
+// Initialize on load
 new GmailDetector();
