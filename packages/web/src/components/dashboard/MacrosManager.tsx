@@ -71,16 +71,31 @@ export default function MacrosManager() {
   const [newContent, setNewContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const teamId = dbUser?.team_id || user?.id;
+  const getTeamId = useCallback(async (): Promise<string | null> => {
+    if (dbUser?.team_id) return dbUser.team_id;
+    if (user?.id) {
+      const { data } = await supabase
+        .from('users')
+        .select('team_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (data?.team_id) return data.team_id;
+    }
+    return null;
+  }, [dbUser, user]);
 
   const fetchMacros = useCallback(async () => {
-    if (!teamId) return;
+    const activeTeamId = await getTeamId();
+    if (!activeTeamId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('macros')
         .select('*')
-        .eq('team_id', teamId)
+        .eq('team_id', activeTeamId)
         .order('created_at', { ascending: false });
 
       if (!error && data) {
@@ -101,7 +116,7 @@ export default function MacrosManager() {
     } finally {
       setLoading(false);
     }
-  }, [teamId]);
+  }, [getTeamId]);
 
   useEffect(() => {
     fetchMacros();
@@ -127,7 +142,13 @@ export default function MacrosManager() {
 
   const handleCreateMacro = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newContent.trim() || !teamId) return;
+    if (!newName.trim() || !newContent.trim()) return;
+
+    const activeTeamId = await getTeamId();
+    if (!activeTeamId) {
+      alert('Please wait a moment while your team workspace connects...');
+      return;
+    }
 
     setIsSaving(true);
     const parsedTags = newTags.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
@@ -136,7 +157,7 @@ export default function MacrosManager() {
       const { data, error } = await supabase
         .from('macros')
         .insert({
-          team_id: teamId,
+          team_id: activeTeamId,
           name: newName.trim(),
           category: newCategory,
           tags: parsedTags,
@@ -145,7 +166,9 @@ export default function MacrosManager() {
         .select()
         .single();
 
-      if (!error && data) {
+      if (error) throw error;
+
+      if (data) {
         const created: MacroItem = {
           id: data.id,
           name: data.name,
@@ -160,23 +183,28 @@ export default function MacrosManager() {
         setNewTags('');
         setNewContent('');
         setIsCreatingCustom(false);
-        setSyncNotice(`Macro "${created.name}" created and synced to team knowledge base!`);
+        setSyncNotice(`✓ Macro "${created.name}" created and synced to team knowledge base!`);
         setTimeout(() => setSyncNotice(null), 4000);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create macro in Supabase:', err);
+      alert(`Could not create macro: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleImportStarters = async () => {
-    if (!teamId) return;
+    const activeTeamId = await getTeamId();
+    if (!activeTeamId) {
+      alert('Please wait a moment while your workspace connects...');
+      return;
+    }
     setIsImportingStarters(true);
 
     try {
       const inserts = STARTER_MACROS.map((sm) => ({
-        team_id: teamId,
+        team_id: activeTeamId,
         name: sm.name,
         category: sm.category,
         tags: sm.tags,
@@ -188,7 +216,9 @@ export default function MacrosManager() {
         .insert(inserts)
         .select();
 
-      if (!error && data) {
+      if (error) throw error;
+
+      if (data) {
         const formatted: MacroItem[] = data.map((d: any) => ({
           id: d.id,
           name: d.name,
@@ -202,8 +232,9 @@ export default function MacrosManager() {
         setSyncNotice(`⚡ 5 Starter support macros imported successfully!`);
         setTimeout(() => setSyncNotice(null), 4000);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to import starter macros:', err);
+      alert(`Could not import starter macros: ${err.message || 'Unknown error'}`);
     } finally {
       setIsImportingStarters(false);
     }

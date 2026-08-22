@@ -51,41 +51,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Helper to construct a resilient fallback user directly from OAuth / Supabase user session
-  const buildUserFromSession = useCallback((authUser: User): DbUser => {
-    const email = authUser.email || '';
-    const metadata = authUser.user_metadata || {};
-    const fullName = metadata.full_name || metadata.name || email.split('@')[0] || 'User';
-    const avatarUrl = metadata.avatar_url || metadata.picture || null;
-    const teamName = metadata.team_name || `${fullName}'s Team`;
-
-    return {
-      id: authUser.id,
-      email,
-      full_name: fullName,
-      avatar_url: avatarUrl,
-      team_id: authUser.id,
-      role: 'owner',
-      teams: {
-        id: authUser.id,
-        name: teamName,
-        plan: 'free',
-      },
-    };
-  }, []);
-
+  // Auto-provisions or retrieves user & team in Supabase
   const handleProvision = useCallback(async (currentSession: Session) => {
     const authUser = currentSession.user;
     if (!authUser) return;
 
-    // Immediately set a baseline user so UI is never blank or showing placeholder 'agent@company.com'
-    const fallbackUser = buildUserFromSession(authUser);
-    setDbUser(fallbackUser);
+    const email = authUser.email || '';
+    const metadata = authUser.user_metadata || {};
+    const fullName = metadata.full_name || metadata.name || email.split('@')[0] || 'User';
+    const avatarUrl = metadata.avatar_url || metadata.picture || null;
+    const defaultTeamName = metadata.team_name || `${fullName}'s Team`;
 
     try {
       // 1. Try server provision endpoint if backend API is reachable
-      const result: ProvisionResponse = await provisionUser(currentSession.access_token);
-      if (result?.user) {
+      const result: ProvisionResponse = await provisionUser(currentSession.access_token).catch(() => null as any);
+      if (result?.user && result?.user?.team_id) {
         setDbUser(result.user);
         setOnboardingState(result.onboardingState);
         setIsFirstLogin(result.isFirstLogin);
@@ -96,11 +76,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
-    } catch (err) {
-      console.warn('API provision unreachable, falling back to direct Supabase client sync:', err);
+    } catch {
+      // Fall through to direct Supabase client sync
     }
 
-    // 2. Direct client-side Supabase sync (handles serverless/standalone frontend deployments)
+    // 2. Direct client-side Supabase query & auto-provisioning
     try {
       // Check if user exists in Supabase DB
       const { data: existingUser } = await supabase
@@ -109,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', authUser.id)
         .maybeSingle();
 
-      if (existingUser) {
+      if (existingUser && existingUser.team_id) {
         const { data: obState } = await supabase
           .from('onboarding_state')
           .select('*')
@@ -119,11 +99,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const formattedUser: DbUser = {
           id: existingUser.id,
           email: existingUser.email,
-          full_name: existingUser.full_name || fallbackUser.full_name,
-          avatar_url: existingUser.avatar_url || fallbackUser.avatar_url,
+          full_name: existingUser.full_name || fullName,
+          avatar_url: existingUser.avatar_url || avatarUrl,
           team_id: existingUser.team_id,
           role: existingUser.role || 'owner',
-          teams: existingUser.teams || fallbackUser.teams,
+          teams: existingUser.teams || {
+            id: existingUser.team_id,
+            name: defaultTeamName,
+            plan: 'free',
+          },
         };
 
         setDbUser(formattedUser);
@@ -134,28 +118,87 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           viewed_demo: false,
         });
         setIsFirstLogin(false);
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('draftpilot_token', currentSession.access_token);
+          localStorage.setItem('draftpilot_user', JSON.stringify(formattedUser));
+        }
       } else {
-        // First login — default to onboarding state
-        setIsFirstLogin(true);
-        setOnboardingState({
+        // User not in DB yet: auto-provision Team + User + OnboardingState in Supabase
+        const { data: newTeam, error: teamErr } = await supabase
+          .from('teams')
+          .insert({ name: defaultTeamName })
+          .select()
+          .single();
+
+        if (teamErr) throw teamErr;
+
+        const { data: newUser, error: userErr } = await supabase
+          .from('users')
+          .insert({
+            id: authUser.id,
+            team_id: newTeam.id,
+            email,
+            full_name: fullName,
+            avatar_url: avatarUrl,
+            role: 'owner',
+          })
+          .select('*, teams(*)')
+          .single();
+
+        if (userErr) throw userErr;
+
+        // Create team_members junction and onboarding_state
+        try {
+          await supabase.from('team_members').insert({
+            team_id: newTeam.id,
+            user_id: authUser.id,
+            role: 'owner',
+          });
+        } catch {
+          // Ignore
+        }
+
+        let newObState = null;
+        try {
+          const { data } = await supabase
+            .from('onboarding_state')
+            .insert({ team_id: newTeam.id })
+            .select()
+            .single();
+          newObState = data;
+        } catch {
+          // Ignore
+        }
+
+        const formattedUser: DbUser = {
+          id: newUser.id,
+          email: newUser.email,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+          team_id: newTeam.id,
+          role: 'owner',
+          teams: newTeam,
+        };
+
+        setDbUser(formattedUser);
+        setOnboardingState(newObState || {
           gmail_connected: false,
           first_macro_added: false,
           extension_installed: false,
           viewed_demo: false,
         });
+        setIsFirstLogin(true);
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('draftpilot_token', currentSession.access_token);
+          localStorage.setItem('draftpilot_user', JSON.stringify(formattedUser));
+        }
       }
-    } catch (dbErr) {
-      console.warn('Direct Supabase sync note:', dbErr);
-      // Ensure onboarding state exists so new users enter onboarding flow
-      setOnboardingState({
-        gmail_connected: false,
-        first_macro_added: false,
-        extension_installed: false,
-        viewed_demo: false,
-      });
-      setIsFirstLogin(true);
+    } catch (err) {
+      console.error('Supabase auto-provision error:', err);
     }
-  }, [buildUserFromSession]);
+  }, []);
 
   useEffect(() => {
     // Check active session on mount
@@ -169,14 +212,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Listen for auth events (e.g. OAuth redirect callback)
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
         setSession(s);
         setUser(s?.user ?? null);
 
         if (event === 'SIGNED_IN' && s) {
+          setIsLoading(true);
           await handleProvision(s);
+          setIsLoading(false);
         }
 
         if (event === 'SIGNED_OUT') {
@@ -217,15 +262,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, teamName?: string) => {
-    const fullName = email.split('@')[0];
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          full_name: fullName,
-          name: fullName,
-          team_name: teamName || `${fullName}'s Team`,
+          full_name: email.split('@')[0],
+          team_name: teamName || `${email.split('@')[0]}'s Team`,
         },
       },
     });
@@ -240,34 +283,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshOnboardingState = async () => {
-    if (session?.user) {
+    if (dbUser?.team_id) {
       try {
         const { data } = await supabase
           .from('onboarding_state')
           .select('*')
-          .eq('team_id', dbUser?.team_id || session.user.id)
+          .eq('team_id', dbUser.team_id)
           .maybeSingle();
 
-        if (data) {
-          setOnboardingState(data);
-        }
+        if (data) setOnboardingState(data);
       } catch (err) {
-        console.error('Failed to refresh onboarding state:', err);
+        console.warn('Failed to refresh onboarding state:', err);
       }
     }
   };
 
   const updateOnboardingFlag = async (updates: Partial<OnboardingState>) => {
-    setOnboardingState((prev) => prev ? { ...prev, ...updates } : null);
-    if (session?.user && dbUser?.team_id) {
-      try {
-        await supabase
-          .from('onboarding_state')
-          .update({ ...updates, updated_at: new Date().toISOString() })
-          .eq('team_id', dbUser.team_id);
-      } catch (err) {
-        console.error('Failed to update onboarding flag in Supabase:', err);
+    if (!dbUser?.team_id) return;
+    try {
+      const { data } = await supabase
+        .from('onboarding_state')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('team_id', dbUser.team_id)
+        .select()
+        .maybeSingle();
+
+      if (data) {
+        setOnboardingState(data);
+      } else {
+        setOnboardingState((prev) => prev ? { ...prev, ...updates } : null);
       }
+    } catch (err) {
+      console.warn('Failed to update onboarding state in Supabase:', err);
     }
   };
 

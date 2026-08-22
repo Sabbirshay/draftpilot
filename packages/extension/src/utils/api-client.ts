@@ -24,10 +24,43 @@ export class ApiClient {
   }
 
   private async getTeamId(): Promise<string | null> {
-    const data = await chrome.storage.local.get(['teamId', 'user']);
-    if (data.teamId) return data.teamId;
-    if (data.user && data.user.team_id) return data.user.team_id;
-    return null;
+    const data = await chrome.storage.local.get(['teamId', 'user', 'token']);
+    if (data.teamId && data.teamId !== data.user?.id) return data.teamId;
+    if (data.user && data.user.team_id && data.user.team_id !== data.user.id) return data.user.team_id;
+
+    // Fallback: Query Supabase directly
+    if (data.token) {
+      try {
+        const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${data.token}`,
+          },
+        });
+        if (userRes.ok) {
+          const authUser = await userRes.json();
+          const dbUserRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/users?id=eq.${authUser.id}&select=*,teams(*)`,
+            {
+              headers: {
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${data.token}`,
+              },
+            }
+          );
+          if (dbUserRes.ok) {
+            const users = await dbUserRes.json();
+            if (users && users.length > 0 && users[0].team_id) {
+              await chrome.storage.local.set({ teamId: users[0].team_id, user: users[0] });
+              return users[0].team_id;
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    return data.teamId || null;
   }
 
   async login(email: string, password: string) {
@@ -71,9 +104,54 @@ export class ApiClient {
       // Ignore
     }
 
-    const teamId = dbUser?.team_id || authUser.id;
-    const teamName = dbUser?.teams?.name || `${email.split('@')[0]}'s Team`;
-    const plan = dbUser?.teams?.plan || 'free';
+    let teamId = dbUser?.team_id;
+    let teamName = dbUser?.teams?.name || `${email.split('@')[0]}'s Team`;
+    let plan = dbUser?.teams?.plan || 'free';
+
+    // If user record doesn't exist in DB, auto-provision team and user
+    if (!dbUser || !teamId) {
+      try {
+        const teamRes = await fetch(`${SUPABASE_URL}/rest/v1/teams`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ name: teamName }),
+        });
+        if (teamRes.ok) {
+          const createdTeams = await teamRes.json();
+          const newTeam = createdTeams[0] || createdTeams;
+          teamId = newTeam.id;
+
+          const userCreateRes = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({
+              id: authUser.id,
+              team_id: teamId,
+              email: authUser.email,
+              full_name: authUser.email.split('@')[0],
+              role: 'owner',
+            }),
+          });
+          if (userCreateRes.ok) {
+            const createdUsers = await userCreateRes.json();
+            dbUser = createdUsers[0] || createdUsers;
+            dbUser.teams = newTeam;
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
 
     await chrome.storage.local.set({
       token,
@@ -83,30 +161,32 @@ export class ApiClient {
         team_id: teamId,
         teams: { name: teamName, plan },
       },
-      teamId,
+      teamId: teamId || authUser.id,
     });
 
     // Mark extension as installed & connected in onboarding_state
-    try {
-      await fetch(
-        `${SUPABASE_URL}/rest/v1/onboarding_state?team_id=eq.${teamId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-            Prefer: 'return=minimal',
-          },
-          body: JSON.stringify({
-            extension_installed: true,
-            gmail_connected: true,
-            updated_at: new Date().toISOString(),
-          }),
-        }
-      );
-    } catch {
-      // Ignore
+    if (teamId) {
+      try {
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/onboarding_state?team_id=eq.${teamId}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+              extension_installed: true,
+              gmail_connected: true,
+              updated_at: new Date().toISOString(),
+            }),
+          }
+        );
+      } catch {
+        // Ignore
+      }
     }
 
     return {
@@ -137,17 +217,6 @@ export class ApiClient {
       throw new Error(err.msg || err.message || 'Signup failed');
     }
 
-    const data = await res.json();
-    if (data.session && data.session.access_token) {
-      await chrome.storage.local.set({
-        token: data.session.access_token,
-        user: { email, team_id: data.user.id, teams: { name: teamName, plan: 'free' } },
-        teamId: data.user.id,
-      });
-      return { accessToken: data.session.access_token, user: data.user };
-    }
-
-    // Attempt instant login
     return await this.login(email, password);
   }
 
@@ -170,6 +239,8 @@ export class ApiClient {
     const authUser = await res.json();
     const stored = await chrome.storage.local.get(['user']);
     return {
+      email: authUser.email,
+      team: stored.user?.teams || { name: `${authUser.email.split('@')[0]}'s Team`, plan: 'free' },
       user: stored.user || {
         email: authUser.email,
         teams: { name: `${authUser.email.split('@')[0]}'s Team`, plan: 'free' },
@@ -202,7 +273,7 @@ export class ApiClient {
   async createMacro(name: string, content: string, tags?: string[]) {
     const token = await this.getToken();
     const teamId = await this.getTeamId();
-    if (!token || !teamId) throw new Error('Not authenticated');
+    if (!token || !teamId) throw new Error('Not authenticated. Please log in again.');
 
     const res = await fetch(`${SUPABASE_URL}/rest/v1/macros`, {
       method: 'POST',
@@ -214,14 +285,17 @@ export class ApiClient {
       },
       body: JSON.stringify({
         team_id: teamId,
-        name,
-        content,
+        name: name.trim(),
+        content: content.trim(),
         category: 'General',
         tags: tags || [],
       }),
     });
 
-    if (!res.ok) throw new Error('Failed to create macro');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Failed to create macro' }));
+      throw new Error(err.message || err.error || 'Failed to create macro in database');
+    }
     const created = await res.json();
     return created[0] || created;
   }
@@ -354,7 +428,7 @@ export class ApiClient {
   async getUsage() {
     const token = await this.getToken();
     const teamId = await this.getTeamId();
-    if (!token || !teamId) return { used: 0, limit: 50 };
+    if (!token || !teamId) return { used: 0, limit: 50, draftsUsed: 0, draftsLimit: 50, plan: 'free' };
 
     try {
       const res = await fetch(
@@ -370,9 +444,9 @@ export class ApiClient {
       );
       const countHeader = res.headers.get('content-range');
       const count = countHeader ? parseInt(countHeader.split('/')[1], 10) || 0 : 0;
-      return { used: count, limit: 50 };
+      return { used: count, limit: 50, draftsUsed: count, draftsLimit: 50, plan: 'free' };
     } catch {
-      return { used: 0, limit: 50 };
+      return { used: 0, limit: 50, draftsUsed: 0, draftsLimit: 50, plan: 'free' };
     }
   }
 
