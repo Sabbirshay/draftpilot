@@ -4,6 +4,56 @@ const SUPABASE_URL = 'https://amjliubpbysvtiqpbgnh.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtamxpdWJwYnlzdnRpcXBiZ25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczODgyNDAsImV4cCI6MjEwMjk2NDI0MH0.pYeCYannOZEYVdGEe-8km-e_II9Mh-S39KtPXD4yCGI';
 
+/**
+ * Sanitizes and extracts the actual customer support reply from raw LLM output,
+ * stripping any internal thinking process, reasoning steps, or markdown fences.
+ */
+export function cleanAiDraft(rawText: string, customerName = 'there'): string {
+  if (!rawText) return '';
+  let text = rawText.trim();
+
+  // 1. Remove XML/HTML style <think>...</think> tags (e.g. DeepSeek / Nemotron / Qwen reasoning)
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. If the response starts with "Here's a thinking process" or numbered reasoning analysis
+  if (
+    /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
+      text
+    )
+  ) {
+    // Look for where the actual greeting / email draft starts
+    const emailMatch = text.match(
+      /(?:^|\n\s*\n|\n)(?:> )?(Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good morning\b|Good afternoon\b|Greetings\b)([\s\S]+)$/i
+    );
+    if (emailMatch) {
+      text = (emailMatch[1] + emailMatch[2]).trim();
+    } else {
+      // Look for a "**Final Response:**" or "**Draft:**" or "Reply:" marker
+      const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
+      if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
+        text = splitMatch[1].trim();
+      }
+    }
+  }
+
+  // 3. Remove leading/trailing markdown code fences (```markdown ... ```)
+  text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+
+  // 4. Remove leading meta labels like "Draft reply:" or "Here is the reply:"
+  text = text
+    .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
+    .trim();
+
+  // 5. Replace template variables with extracted customer name if still present
+  text = text
+    .replace(/{{name}}/g, customerName)
+    .replace(/{{customer_name}}/g, customerName)
+    .replace(/\[Customer\]/g, customerName)
+    .replace(/\[Name\]/g, customerName);
+
+  return text;
+}
+
 export class ApiClient {
   private baseUrl = SUPABASE_URL;
   private settingsCache: { data: any; timestamp: number } | null = null;
@@ -359,9 +409,11 @@ export class ApiClient {
     }
 
     if (!matchedMacro && macros.length > 0) {
-      // Keyword matching
       matchedMacro = macros.find((m: any) => {
-        const nameMatch = m.name.toLowerCase().split(' ').some((w: string) => w.length > 3 && lowerThread.includes(w));
+        const nameMatch = m.name
+          .toLowerCase()
+          .split(' ')
+          .some((w: string) => w.length > 3 && lowerThread.includes(w));
         const tagMatch = m.tags?.some((t: string) => lowerThread.includes(t.toLowerCase()));
         return nameMatch || tagMatch;
       });
@@ -374,10 +426,8 @@ export class ApiClient {
       customerName = nameMatch[1];
     }
 
-    // 4. Generate intelligent contextual draft
-    let draftText = '';
+    // 4. Load AI Settings
     let config = null;
-
     if (token) {
       try {
         if (this.settingsCache && Date.now() - this.settingsCache.timestamp < 300000) {
@@ -398,30 +448,50 @@ export class ApiClient {
             this.settingsCache = { data: config, timestamp: Date.now() };
           }
         }
-      } catch (err) {
-        // Fallback silently
+      } catch {
+        // Fallback
       }
     }
 
+    let draftText = '';
     let openRouterSuccess = false;
+
+    // Strict system instructions to prevent internal thinking output
+    const strictSystemPrompt = `${
+      config?.system_prompt ||
+      'You are DraftPilot, an intelligent AI reply assistant for customer support. Generate a calm, polite, and concise reply based strictly on the provided thread and matched team macros.'
+    }
+
+CRITICAL FORMATTING INSTRUCTIONS:
+1. Output ONLY the raw final email reply text.
+2. Absolutely DO NOT output any "thinking process", chain-of-thought, internal analysis steps, or markdown bullet breakdowns.
+3. Begin IMMEDIATELY with the customer greeting (e.g., "Hi ${customerName}," or "Hello,") and conclude with a warm sign-off (e.g., "Best regards,\\nSupport Team").
+4. Do NOT wrap in markdown code blocks.`;
 
     if (config && config.openrouter_api_key && config.openrouter_model) {
       try {
+        const activeModel = config.selected_model || config.openrouter_model;
+        const userPrompt = `Customer Message:
+${scrubbed}
+
+${matchedMacro?.content ? `Knowledge Base Reference Macro:\n${matchedMacro.content}\n` : ''}
+Write the clean, direct customer email reply now:`;
+
         const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.openrouter_api_key}`,
+            Authorization: `Bearer ${config.openrouter_api_key}`,
             'HTTP-Referer': 'https://draftpilot-web.vercel.app',
             'X-Title': 'DraftPilot',
           },
           body: JSON.stringify({
-            model: config.selected_model || config.openrouter_model,
+            model: activeModel,
             messages: [
-              { role: 'system', content: config.system_prompt || 'You are a helpful customer support assistant.' },
-              { role: 'user', content: `Draft a professional, friendly reply to this customer email. Be concise.\n\nMatched support macro: ${matchedMacro?.content || 'None'}\n\nCustomer message: ${scrubbed}` },
+              { role: 'system', content: strictSystemPrompt },
+              { role: 'user', content: userPrompt },
             ],
-            max_tokens: config.max_tokens || 300,
+            max_tokens: config.max_tokens || 400,
             temperature: parseFloat(config.temperature as string) || 0.4,
           }),
         });
@@ -429,15 +499,20 @@ export class ApiClient {
         if (openrouterRes.ok) {
           const openRouterData = await openrouterRes.json();
           if (openRouterData.choices && openRouterData.choices.length > 0) {
-            draftText = openRouterData.choices[0].message.content.trim();
-            openRouterSuccess = true;
+            const rawContent = openRouterData.choices[0].message.content || '';
+            const cleaned = cleanAiDraft(rawContent, customerName);
+            if (cleaned.length > 10) {
+              draftText = cleaned;
+              openRouterSuccess = true;
+            }
           }
         }
-      } catch (err) {
-        // Fallback silently
+      } catch {
+        // Fallback
       }
     }
 
+    // 5. High-Fidelity Fallback if OpenRouter was not configured or offline
     if (!openRouterSuccess) {
       if (matchedMacro) {
         draftText = matchedMacro.content
@@ -446,7 +521,6 @@ export class ApiClient {
           .replace(/\[Customer\]/g, customerName)
           .replace(/\[Name\]/g, customerName);
       } else {
-        // Natural contextual reply template
         if (lowerThread.includes('refund') || lowerThread.includes('return')) {
           draftText = `Hi ${customerName},\n\nThank you for reaching out to us. I'd be happy to help you with your return or refund request.\n\nPlease confirm your order number, and I will gladly process this and send over your prepaid return label right away.\n\nBest regards,\nCustomer Support Team`;
         } else if (lowerThread.includes('delay') || lowerThread.includes('where is') || lowerThread.includes('tracking')) {
@@ -459,7 +533,7 @@ export class ApiClient {
       }
     }
 
-    // 5. Save draft generation event to Supabase draft_history for live analytics
+    // 6. Save draft generation event to Supabase draft_history for live analytics
     if (token && teamId) {
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/draft_history`, {

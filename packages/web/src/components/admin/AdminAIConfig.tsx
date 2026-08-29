@@ -285,7 +285,31 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
       const latency = (Date.now() - start) / 1000;
 
       if (data.choices && data.choices[0]) {
-        setTestResponse(data.choices[0].message.content);
+        const rawContent = data.choices[0].message.content || '';
+        let cleaned = rawContent.trim().replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        if (
+          /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
+            cleaned
+          )
+        ) {
+          const emailMatch = cleaned.match(
+            /(?:^|\n\s*\n|\n)(?:> )?(Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good morning\b|Good afternoon\b|Greetings\b)([\s\S]+)$/i
+          );
+          if (emailMatch) {
+            cleaned = (emailMatch[1] + emailMatch[2]).trim();
+          } else {
+            const splitMatch = cleaned.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
+            if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
+              cleaned = splitMatch[1].trim();
+            }
+          }
+        }
+        cleaned = cleaned.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+        cleaned = cleaned
+          .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
+          .trim();
+
+        setTestResponse(cleaned || rawContent);
         setTestMetrics({
           tokens: data.usage?.total_tokens || 0,
           latency: latency,

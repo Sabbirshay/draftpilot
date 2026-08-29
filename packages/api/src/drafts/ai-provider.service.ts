@@ -88,7 +88,10 @@ export class AiProviderService {
         if (response.ok) {
           const data = await response.json() as any;
           const content = data.choices?.[0]?.message?.content?.trim();
-          if (content) return content;
+          if (content) {
+            const cleaned = this.cleanDraft(content);
+            if (cleaned.length > 5) return cleaned;
+          }
         } else {
           this.logger.warn(`OpenRouter API call failed with status: ${response.status}`);
         }
@@ -117,6 +120,34 @@ export class AiProviderService {
 
     // High-Fidelity Smart Customer Support Synthesizer Fallback
     return this.synthesizeSmartDraft(prompt);
+  }
+
+  private cleanDraft(rawText: string): string {
+    if (!rawText) return '';
+    let text = rawText.trim();
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (
+      /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
+        text
+      )
+    ) {
+      const emailMatch = text.match(
+        /(?:^|\n\s*\n|\n)(?:> )?(Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good morning\b|Good afternoon\b|Greetings\b)([\s\S]+)$/i
+      );
+      if (emailMatch) {
+        text = (emailMatch[1] + emailMatch[2]).trim();
+      } else {
+        const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
+        if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
+          text = splitMatch[1].trim();
+        }
+      }
+    }
+    text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+    text = text
+      .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
+      .trim();
+    return text;
   }
 
   /**
