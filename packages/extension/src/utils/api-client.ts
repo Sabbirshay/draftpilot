@@ -543,102 +543,40 @@ export class ApiClient {
     // Extract customer first name from thread using multi-pattern parser
     const customerName = extractSenderName(threadContent);
 
-    // 4. Load AI Settings
-    let config = null;
+    // 4. Request draft generation securely from server endpoint (keeping API keys server-side)
+    let draftText = '';
+    let serverSuccess = false;
+
     if (token) {
       try {
-        if (this.settingsCache && Date.now() - this.settingsCache.timestamp < 300000) {
-          config = this.settingsCache.data;
-        } else {
-          const settingsRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/platform_settings?select=*&limit=1`,
-            {
-              headers: {
-                apikey: SUPABASE_ANON_KEY,
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
-          if (settingsRes.ok) {
-            const settings = await settingsRes.json();
-            config = settings?.[0];
-            this.settingsCache = { data: config, timestamp: Date.now() };
-          }
-        }
-      } catch {
-        // Fallback
-      }
-    }
-
-    let draftText = '';
-    let openRouterSuccess = false;
-
-    // Strict system prompt that prevents reasoning outputs
-    const strictSystemPrompt = `You are DraftPilot, an intelligent customer support assistant. You write concise, friendly, and professional email replies directly to customers based on company knowledge.
-
-CRITICAL INSTRUCTIONS:
-1. Output ONLY the raw final email reply text.
-2. Absolutely DO NOT output any thinking process, analysis, reasoning steps, or markdown bullets.
-3. Start directly with "Hi ${customerName}," and end with "Best regards,\\nSupport Team".
-4. Do NOT wrap in markdown code blocks.`;
-
-    if (config && config.openrouter_api_key && config.openrouter_model) {
-      try {
-        const activeModel = config.selected_model || config.openrouter_model;
-
-        // Build comprehensive context from BOTH Macros and Knowledge Base Documents
-        let knowledgeContext = '';
-        if (matchedMacro) {
-          knowledgeContext += `### Recommended Support Macro & Policy:\n${matchedMacro.content}\n\n`;
-        }
-        if (kbSnippets.length > 0) {
-          knowledgeContext += `### Knowledge Base & Documentation Context:\n${kbSnippets.join('\n---\n')}\n\n`;
-        }
-
-        const userPrompt = `Customer Message:
-${scrubbed}
-
-${knowledgeContext}Write the clean, direct customer email reply now:`;
-
-        const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        const genRes = await fetch('https://draftpilot-web.vercel.app/api/drafts/generate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${config.openrouter_api_key}`,
-            'HTTP-Referer': 'https://draftpilot-web.vercel.app',
-            'X-Title': 'DraftPilot',
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            model: activeModel,
-            messages: [
-              { role: 'system', content: strictSystemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-            max_tokens: Math.max(1000, Number(config.max_tokens) || 1000),
-            temperature: parseFloat(config.temperature as string) || 0.4,
-            include_reasoning: false,
-            reasoning: { max_tokens: 0 },
+            threadContent: scrubbed,
+            macroHint: hint,
+            matchedMacro,
+            kbSnippets,
           }),
         });
 
-        if (openrouterRes.ok) {
-          const openRouterData = await openrouterRes.json();
-          if (openRouterData.choices && openRouterData.choices.length > 0) {
-            const rawContent = openRouterData.choices[0].message.content || '';
-            const cleaned = cleanAiDraft(rawContent, customerName);
-            if (cleaned && cleaned.length > 15) {
-              draftText = cleaned;
-              openRouterSuccess = true;
-            }
+        if (genRes.ok) {
+          const genData = await genRes.json();
+          if (genData.draft) {
+            draftText = genData.draft;
+            serverSuccess = true;
           }
         }
-      } catch {
-        // Fallback
+      } catch (err) {
+        console.warn('Server draft generation fallback:', err);
       }
     }
 
-    // 5. High-Fidelity Grounded Fallback if OpenRouter was offline or output pure thinking
-    if (!openRouterSuccess) {
+    // 5. High-Fidelity Grounded Fallback if server was offline
+    if (!serverSuccess) {
       if (matchedMacro) {
         draftText = matchedMacro.content
           .replace(/{{name}}/g, customerName)

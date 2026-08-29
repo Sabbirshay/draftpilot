@@ -76,14 +76,31 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
       if (cachedTokens) setMaxTokens(Number(cachedTokens));
     }
 
-    // Step B: Cloud sync from Supabase platform_settings
+    // Step B: Cloud sync from secure server endpoint
     async function syncFromCloud() {
       try {
-        const { data } = await supabase
-          .from('platform_settings')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token || localStorage.getItem('draftpilot_token');
+
+        let data = null;
+        if (token) {
+          const res = await fetch('/api/admin/ai-config', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const body = await res.json();
+            data = body.config;
+          }
+        }
+
+        if (!data) {
+          const dbRes = await supabase
+            .from('platform_settings')
+            .select('*')
+            .limit(1)
+            .maybeSingle();
+          data = dbRes.data;
+        }
 
         if (data) {
           setDbId(data.id);
@@ -215,7 +232,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
       localStorage.setItem('draftpilot_max_tokens', String(maxTokens));
     }
 
-    // 2. Deploy to Supabase platform_settings table
+    // 2. Deploy to Supabase platform_settings via secure admin endpoint
     try {
       const payload: any = {
         ai_provider: provider,
@@ -236,7 +253,25 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         setDbId(payload.id);
       }
 
-      await supabase.from('platform_settings').upsert(payload);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || localStorage.getItem('draftpilot_token');
+
+      let saved = false;
+      if (token) {
+        const res = await fetch('/api/admin/ai-config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) saved = true;
+      }
+
+      if (!saved) {
+        await supabase.from('platform_settings').upsert(payload);
+      }
       
       setSaveBanner(`✓ Deployed ${activeModel} to all customer inboxes and saved to vault! 🚀`);
       setTimeout(() => setSaveBanner(null), 4500);
