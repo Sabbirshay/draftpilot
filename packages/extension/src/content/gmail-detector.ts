@@ -83,6 +83,15 @@ class GmailDetector {
       result += `Subject: ${subjectEl.textContent.trim()}\n\n`;
     }
 
+    // Extract Sender Name directly from Gmail Header DOM
+    const senderEl = document.querySelector('span.gD, .gD[email], h3 .gD, span[name], .zF, .bJ4');
+    if (senderEl) {
+      const name = senderEl.getAttribute('name') || senderEl.textContent?.trim() || '';
+      if (name && name.length > 1) {
+        result += `From: ${name}\n\n`;
+      }
+    }
+
     // Extract Senders & Bodies
     const messageBodies = document.querySelectorAll('.a3s.aiL, .a3s, .ii.gt, div[data-message-id]');
     const compose = this.findComposeBox();

@@ -63,7 +63,45 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
     .replace(/\[Customer\]/g, customerName)
     .replace(/\[Name\]/g, customerName);
 
+  // 7. Personalize generic "Hi there," or "Hi," to "Hi [Sender Name],"
+  if (customerName && customerName.toLowerCase() !== 'there') {
+    text = text.replace(/^(?:Hi|Hello|Dear)\s+there,/im, `Hi ${customerName},`);
+    text = text.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
+  }
+
   return text;
+}
+
+export function extractSenderName(text: string): string {
+  if (!text) return 'there';
+  const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
+  const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
+  const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
+  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Z][a-z]+)/i);
+
+  if (fromMatch && fromMatch[1].trim()) {
+    const clean = fromMatch[1].replace(/["']/g, '').trim();
+    if (clean && !clean.toLowerCase().includes('redacted')) {
+      return clean.split(' ')[0];
+    }
+  }
+  if (lineAngleMatch && lineAngleMatch[1].trim()) {
+    const clean = lineAngleMatch[1].trim();
+    if (clean && !clean.toLowerCase().startsWith('subject')) {
+      return clean.split(' ')[0];
+    }
+  }
+  if (signMatch && signMatch[1]) {
+    return signMatch[1].trim();
+  }
+  if (greetMatch && greetMatch[1]) {
+    const candidate = greetMatch[1].trim();
+    const blacklist = ['there', 'team', 'support', 'all', 'everyone', 'sir', 'madam', 'can', 'could', 'would', 'please'];
+    if (!blacklist.includes(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+  return 'there';
 }
 
 export class ApiClient {
@@ -431,12 +469,8 @@ export class ApiClient {
       });
     }
 
-    // Extract customer first name from thread if possible
-    let customerName = 'there';
-    const nameMatch = threadContent.match(/(?:from|hi|dear|hello)\s+([A-Z][a-z]+)/i);
-    if (nameMatch && nameMatch[1]) {
-      customerName = nameMatch[1];
-    }
+    // Extract customer first name from thread using multi-pattern parser
+    const customerName = extractSenderName(threadContent);
 
     // 4. Load AI Settings
     let config = null;
@@ -530,6 +564,11 @@ ${matchedMacro?.content ? `Relevant Company Knowledge / Macro:\n${matchedMacro.c
           .replace(/{{customer_name}}/g, customerName)
           .replace(/\[Customer\]/g, customerName)
           .replace(/\[Name\]/g, customerName);
+
+        if (customerName && customerName.toLowerCase() !== 'there') {
+          draftText = draftText.replace(/^(?:Hi|Hello|Dear)\s+there,/im, `Hi ${customerName},`);
+          draftText = draftText.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
+        }
       } else {
         if (lowerThread.includes('refund') || lowerThread.includes('return')) {
           draftText = `Hi ${customerName},\n\nThank you for reaching out to us. I'd be happy to help you with your return or refund request.\n\nPlease confirm your order number, and I will gladly process this and send over your prepaid return label right away.\n\nBest regards,\nCustomer Support Team`;

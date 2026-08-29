@@ -374,10 +374,30 @@ class SidePanel {
 
     this.currentThreadText = text;
 
-    // Extract customer first name
-    const match = text.match(/(?:from|hi|dear|hello)\s+([A-Z][a-z]+)/i);
-    if (match && match[1]) {
-      this.customerName = match[1];
+    // Robust multi-pattern customer sender name extraction
+    const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
+    const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
+    const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
+    const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Z][a-z]+)/i);
+
+    if (fromMatch && fromMatch[1].trim()) {
+      const clean = fromMatch[1].replace(/["']/g, '').trim();
+      if (clean && !clean.toLowerCase().includes('redacted')) {
+        this.customerName = clean.split(' ')[0];
+      }
+    } else if (lineAngleMatch && lineAngleMatch[1].trim()) {
+      const clean = lineAngleMatch[1].trim();
+      if (clean && !clean.toLowerCase().startsWith('subject')) {
+        this.customerName = clean.split(' ')[0];
+      }
+    } else if (signMatch && signMatch[1]) {
+      this.customerName = signMatch[1].trim();
+    } else if (greetMatch && greetMatch[1]) {
+      const candidate = greetMatch[1].trim();
+      const blacklist = ['there', 'team', 'support', 'all', 'everyone', 'sir', 'madam', 'can', 'could', 'would', 'please'];
+      if (!blacklist.includes(candidate.toLowerCase())) {
+        this.customerName = candidate;
+      }
     }
 
     const statusEl = document.getElementById('thread-status');
