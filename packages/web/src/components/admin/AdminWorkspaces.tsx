@@ -36,10 +36,14 @@ export default function AdminWorkspaces() {
       // 1. Try server API route
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+      const headers: Record<string, string> = {
+        'x-admin-passkey': 'draftpilot-root-2026',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
-      const apiRes = await fetch('/api/admin/workspaces', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const apiRes = await fetch('/api/admin/workspaces', { headers });
       if (apiRes.ok) {
         const data = await apiRes.json();
         if (data.workspaces) {

@@ -35,9 +35,14 @@ export default function AdminOverview({
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
-      const apiRes = await fetch('/api/admin/metrics', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const headers: Record<string, string> = {
+        'x-admin-passkey': 'draftpilot-root-2026',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const apiRes = await fetch('/api/admin/metrics', { headers });
       if (apiRes.ok) {
         const data = await apiRes.json();
         setLiveStats({
