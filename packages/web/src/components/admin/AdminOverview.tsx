@@ -31,8 +31,13 @@ export default function AdminOverview({
   const fetchLiveMetrics = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      // 1. Try server-side API route (which has superadmin service_role access)
-      const apiRes = await fetch('/api/admin/metrics');
+      // 1. Try server-side API route (which requires superadmin auth)
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
+      const apiRes = await fetch('/api/admin/metrics', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (apiRes.ok) {
         const data = await apiRes.json();
         setLiveStats({

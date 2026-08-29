@@ -34,7 +34,12 @@ export default function AdminWorkspaces() {
     setIsRefreshing(true);
     try {
       // 1. Try server API route
-      const apiRes = await fetch('/api/admin/workspaces');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
+      const apiRes = await fetch('/api/admin/workspaces', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (apiRes.ok) {
         const data = await apiRes.json();
         if (data.workspaces) {
@@ -134,9 +139,15 @@ export default function AdminWorkspaces() {
   const handleQuickBoost = async (ws: WorkspaceData, bonus: number) => {
     const newQuota = ws.monthlyQuota + bonus;
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
       const res = await fetch('/api/admin/workspaces', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ id: ws.id, monthly_draft_limit: newQuota }),
       });
 
@@ -163,9 +174,15 @@ export default function AdminWorkspaces() {
     if (!editingWorkspace) return;
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
       const res = await fetch('/api/admin/workspaces', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           id: editingWorkspace.id,
           monthly_draft_limit: overrideQuotaVal,

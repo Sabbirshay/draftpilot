@@ -1,16 +1,14 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin, verifySuperAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export async function GET(req: NextRequest) {
+  const auth = await verifySuperAdmin(req);
+  if (!auth.authorized) {
+    return auth.response!;
+  }
 
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { persistSession: false },
-});
-
-export async function GET() {
   try {
     const [teamsRes, usersRes, draftsRes] = await Promise.all([
       supabaseAdmin.from('teams').select('*').order('created_at', { ascending: false }),
@@ -63,7 +61,12 @@ export async function GET() {
   }
 }
 
-export async function PATCH(req: Request) {
+export async function PATCH(req: NextRequest) {
+  const auth = await verifySuperAdmin(req);
+  if (!auth.authorized) {
+    return auth.response!;
+  }
+
   try {
     const body = await req.json();
     const { id, monthly_draft_limit, plan } = body;
