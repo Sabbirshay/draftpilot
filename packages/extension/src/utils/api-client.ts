@@ -6,6 +6,7 @@ const SUPABASE_ANON_KEY =
 
 export class ApiClient {
   private baseUrl = SUPABASE_URL;
+  private settingsCache: { data: any; timestamp: number } | null = null;
 
   constructor() {
     this.initBaseUrl();
@@ -375,22 +376,86 @@ export class ApiClient {
 
     // 4. Generate intelligent contextual draft
     let draftText = '';
-    if (matchedMacro) {
-      draftText = matchedMacro.content
-        .replace(/{{name}}/g, customerName)
-        .replace(/{{customer_name}}/g, customerName)
-        .replace(/\[Customer\]/g, customerName)
-        .replace(/\[Name\]/g, customerName);
-    } else {
-      // Natural contextual reply template
-      if (lowerThread.includes('refund') || lowerThread.includes('return')) {
-        draftText = `Hi ${customerName},\n\nThank you for reaching out to us. I'd be happy to help you with your return or refund request.\n\nPlease confirm your order number, and I will gladly process this and send over your prepaid return label right away.\n\nBest regards,\nCustomer Support Team`;
-      } else if (lowerThread.includes('delay') || lowerThread.includes('where is') || lowerThread.includes('tracking')) {
-        draftText = `Hi ${customerName},\n\nThanks for checking in on your shipment! I understand waiting for an order can be frustrating, and I apologize for the delay.\n\nI've checked on your shipment status with our carrier and it is actively on its way. You should see delivery within the next 2-3 business days.\n\nPlease let me know if you have any further questions!\n\nBest regards,\nCustomer Support Team`;
-      } else if (lowerThread.includes('password') || lowerThread.includes('login') || lowerThread.includes('account')) {
-        draftText = `Hi ${customerName},\n\nI can certainly assist you with accessing your account. I have initiated a secure password reset for your email.\n\nPlease check your inbox for the reset link (and your spam folder if it doesn't arrive within 5 minutes).\n\nLet us know if you need any additional help!\n\nBest regards,\nCustomer Support Team`;
+    let config = null;
+
+    if (token) {
+      try {
+        if (this.settingsCache && Date.now() - this.settingsCache.timestamp < 300000) {
+          config = this.settingsCache.data;
+        } else {
+          const settingsRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/platform_settings?select=*&limit=1`,
+            {
+              headers: {
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          if (settingsRes.ok) {
+            const settings = await settingsRes.json();
+            config = settings?.[0];
+            this.settingsCache = { data: config, timestamp: Date.now() };
+          }
+        }
+      } catch (err) {
+        // Fallback silently
+      }
+    }
+
+    let openRouterSuccess = false;
+
+    if (config && config.openrouter_api_key && config.openrouter_model) {
+      try {
+        const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.openrouter_api_key}`,
+            'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+            'X-Title': 'DraftPilot',
+          },
+          body: JSON.stringify({
+            model: config.selected_model || config.openrouter_model,
+            messages: [
+              { role: 'system', content: config.system_prompt || 'You are a helpful customer support assistant.' },
+              { role: 'user', content: `Draft a professional, friendly reply to this customer email. Be concise.\n\nMatched support macro: ${matchedMacro?.content || 'None'}\n\nCustomer message: ${scrubbed}` },
+            ],
+            max_tokens: config.max_tokens || 300,
+            temperature: parseFloat(config.temperature as string) || 0.4,
+          }),
+        });
+
+        if (openrouterRes.ok) {
+          const openRouterData = await openrouterRes.json();
+          if (openRouterData.choices && openRouterData.choices.length > 0) {
+            draftText = openRouterData.choices[0].message.content.trim();
+            openRouterSuccess = true;
+          }
+        }
+      } catch (err) {
+        // Fallback silently
+      }
+    }
+
+    if (!openRouterSuccess) {
+      if (matchedMacro) {
+        draftText = matchedMacro.content
+          .replace(/{{name}}/g, customerName)
+          .replace(/{{customer_name}}/g, customerName)
+          .replace(/\[Customer\]/g, customerName)
+          .replace(/\[Name\]/g, customerName);
       } else {
-        draftText = `Hi ${customerName},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
+        // Natural contextual reply template
+        if (lowerThread.includes('refund') || lowerThread.includes('return')) {
+          draftText = `Hi ${customerName},\n\nThank you for reaching out to us. I'd be happy to help you with your return or refund request.\n\nPlease confirm your order number, and I will gladly process this and send over your prepaid return label right away.\n\nBest regards,\nCustomer Support Team`;
+        } else if (lowerThread.includes('delay') || lowerThread.includes('where is') || lowerThread.includes('tracking')) {
+          draftText = `Hi ${customerName},\n\nThanks for checking in on your shipment! I understand waiting for an order can be frustrating, and I apologize for the delay.\n\nI've checked on your shipment status with our carrier and it is actively on its way. You should see delivery within the next 2-3 business days.\n\nPlease let me know if you have any further questions!\n\nBest regards,\nCustomer Support Team`;
+        } else if (lowerThread.includes('password') || lowerThread.includes('login') || lowerThread.includes('account')) {
+          draftText = `Hi ${customerName},\n\nI can certainly assist you with accessing your account. I have initiated a secure password reset for your email.\n\nPlease check your inbox for the reset link (and your spam folder if it doesn't arrive within 5 minutes).\n\nLet us know if you need any additional help!\n\nBest regards,\nCustomer Support Team`;
+        } else {
+          draftText = `Hi ${customerName},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
+        }
       }
     }
 

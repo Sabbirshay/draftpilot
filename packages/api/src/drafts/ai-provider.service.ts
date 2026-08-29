@@ -1,24 +1,53 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { SupabaseService } from '../config/supabase.service';
+
+interface PlatformSettings {
+  ai_provider: string;
+  openrouter_api_key?: string;
+  openrouter_model?: string;
+  openai_api_key?: string;
+  anthropic_api_key?: string;
+  selected_model?: string;
+  system_prompt?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
 
 @Injectable()
 export class AiProviderService {
-  private openai: OpenAI | null = null;
-  private model: string;
-  private maxTokens: number;
   private readonly logger = new Logger(AiProviderService.name);
+  private cachedSettings: PlatformSettings | null = null;
+  private cachedAt: number = 0;
 
-  constructor(private configService: ConfigService) {
-    const apiKey = this.configService.get<string>('OPENAI_API_KEY');
-    this.model = this.configService.get<string>('AI_MODEL') || 'gpt-4o-mini';
-    this.maxTokens = parseInt(this.configService.get<string>('AI_MAX_TOKENS') || '300', 10);
-    
-    if (apiKey && apiKey.trim().length > 0 && apiKey !== 'dummy-key') {
-      this.openai = new OpenAI({ apiKey });
-      this.logger.log(`Initialized OpenAI Provider with model: ${this.model}`);
-    } else {
-      this.logger.warn('OPENAI_API_KEY is not configured. Running in Smart Offline Neural Simulator mode.');
+  constructor(private supabase: SupabaseService) {}
+
+  private async getSettings(): Promise<PlatformSettings | null> {
+    const now = Date.now();
+    if (this.cachedSettings && (now - this.cachedAt < 60000)) {
+      return this.cachedSettings;
+    }
+
+    try {
+      const { data, error } = await this.supabase.getClient()
+        .from('platform_settings')
+        .select('*')
+        .limit(1)
+        .single();
+      
+      if (error) {
+        if (error.code !== 'PGRST116') { // not found
+          this.logger.warn(`Failed to fetch platform settings: ${error.message}`);
+        }
+        return null;
+      }
+      
+      this.cachedSettings = data;
+      this.cachedAt = now;
+      return data;
+    } catch (e: any) {
+      this.logger.warn(`Failed to fetch platform settings: ${e.message}`);
+      return null;
     }
   }
 
@@ -26,12 +55,57 @@ export class AiProviderService {
    * Generate text using configured AI provider or smart local simulator fallback
    */
   async generateText(prompt: string): Promise<string> {
-    if (this.openai) {
+    const settings = await this.getSettings();
+    const provider = settings?.ai_provider || 'offline';
+    const temp = settings?.temperature !== undefined ? Number(settings.temperature) : 0.4;
+    const maxTokens = settings?.max_tokens || 300;
+    const model = settings?.selected_model || 'meta-llama/llama-3.1-8b-instruct:free';
+    const systemPrompt = settings?.system_prompt || 'You are a helpful customer support assistant. Draft a professional, friendly reply. Be concise.';
+
+    this.logger.log(`Using AI Provider: ${provider}`);
+
+    if (provider === 'openrouter' && settings?.openrouter_api_key) {
       try {
-        const response = await this.openai.chat.completions.create({
-          model: this.model,
-          messages: [{ role: 'system', content: prompt }],
-          max_tokens: this.maxTokens,
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${settings.openrouter_api_key}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+            'X-Title': 'DraftPilot'
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt }
+            ],
+            max_tokens: maxTokens,
+            temperature: temp
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json() as any;
+          const content = data.choices?.[0]?.message?.content?.trim();
+          if (content) return content;
+        } else {
+          this.logger.warn(`OpenRouter API call failed with status: ${response.status}`);
+        }
+      } catch (error: any) {
+        this.logger.warn(`OpenRouter API call failed (${error.message}). Falling back to Smart Simulator.`);
+      }
+    } else if (provider === 'openai' && settings?.openai_api_key) {
+      try {
+        const openai = new OpenAI({ apiKey: settings.openai_api_key });
+        const response = await openai.chat.completions.create({
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: maxTokens,
+          temperature: temp
         });
 
         const content = response.choices[0]?.message?.content?.trim();

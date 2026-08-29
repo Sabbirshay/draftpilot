@@ -41,7 +41,15 @@ export class DraftsService {
     }
 
     // 3. Build prompt
-    const prompt = `You are a helpful customer support assistant. Draft a professional, friendly reply. Be concise.
+    const { data: settings } = await this.supabase.getClient()
+      .from('platform_settings')
+      .select('system_prompt')
+      .limit(1)
+      .single();
+      
+    const systemPrompt = settings?.system_prompt || 'You are a helpful customer support assistant. Draft a professional, friendly reply. Be concise.';
+
+    const prompt = `${systemPrompt}
 ${macroContent ? `Use this reference material: ${macroContent}` : ''}
 Customer message: ${dto.threadContent}
 
