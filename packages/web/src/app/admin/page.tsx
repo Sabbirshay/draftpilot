@@ -8,7 +8,7 @@ import AdminWorkspaces from '@/components/admin/AdminWorkspaces';
 import AdminAIConfig from '@/components/admin/AdminAIConfig';
 import AdminGlobalMacros from '@/components/admin/AdminGlobalMacros';
 import AdminFeatureFlags from '@/components/admin/AdminFeatureFlags';
-import BillingManager from '@/components/dashboard/BillingManager';
+import AdminBillingAnalytics from '@/components/admin/AdminBillingAnalytics';
 import GmailSyncManager from '@/components/dashboard/GmailSyncManager';
 
 export default function AdminPage() {
@@ -67,7 +67,7 @@ export default function AdminPage() {
             {activeTab === 'workspaces' && <AdminWorkspaces />}
             {activeTab === 'ai-config' && <AdminAIConfig />}
             {activeTab === 'global-macros' && <AdminGlobalMacros />}
-            {activeTab === 'billing' && <BillingManager />}
+            {activeTab === 'billing' && <AdminBillingAnalytics />}
             {activeTab === 'security' && <GmailSyncManager />}
             {activeTab === 'features' && <AdminFeatureFlags />}
           </div>
