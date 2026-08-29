@@ -137,48 +137,64 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
     setKeyStatus('untested');
   };
 
+  const [keyVerifyMessage, setKeyVerifyMessage] = useState<string | null>(null);
+
   const handleVerifyKey = async () => {
+    setKeyVerifyMessage(null);
     if (provider === 'openrouter') {
-      if (!openrouterKey.trim()) {
+      const trimmed = openrouterKey.trim();
+      if (!trimmed || !trimmed.startsWith('sk-or-')) {
         setKeyStatus('invalid');
+        setKeyVerifyMessage('Key must start with sk-or-v1-...');
         return;
       }
       setKeyStatus('testing');
       try {
-        const res = await fetch('https://openrouter.ai/api/v1/models', {
-          headers: { Authorization: `Bearer ${openrouterKey.trim()}` },
+        const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
+          headers: { Authorization: `Bearer ${trimmed}` },
         });
-        if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.data) {
           setKeyStatus('valid');
+          const label = json.data.label ? ` (${json.data.label})` : '';
+          setKeyVerifyMessage(`Verified & Active${label}`);
           if (typeof window !== 'undefined') {
-            localStorage.setItem('draftpilot_openrouter_key', openrouterKey.trim());
+            localStorage.setItem('draftpilot_openrouter_key', trimmed);
           }
         } else {
           setKeyStatus('invalid');
+          setKeyVerifyMessage(json?.error?.message || 'Invalid OpenRouter Key');
         }
-      } catch {
+      } catch (err: any) {
         setKeyStatus('invalid');
+        setKeyVerifyMessage('Network error connecting to OpenRouter');
       }
     } else if (provider === 'openai') {
-      if (!openaiKey.trim()) {
+      const trimmed = openaiKey.trim();
+      if (!trimmed || !trimmed.startsWith('sk-')) {
         setKeyStatus('invalid');
+        setKeyVerifyMessage('OpenAI key must start with sk-');
         return;
       }
       setKeyStatus('testing');
       try {
         const res = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${openaiKey.trim()}` },
+          headers: { Authorization: `Bearer ${trimmed}` },
         });
+        const json = await res.json().catch(() => null);
         if (res.ok) {
           setKeyStatus('valid');
+          setKeyVerifyMessage('Verified & Active');
           if (typeof window !== 'undefined') {
-            localStorage.setItem('draftpilot_openai_key', openaiKey.trim());
+            localStorage.setItem('draftpilot_openai_key', trimmed);
           }
         } else {
           setKeyStatus('invalid');
+          setKeyVerifyMessage(json?.error?.message || 'Invalid OpenAI Key');
         }
       } catch {
         setKeyStatus('invalid');
+        setKeyVerifyMessage('Network error connecting to OpenAI');
       }
     }
   };
@@ -374,8 +390,18 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
             >
               {keyStatus === 'testing' ? 'Testing...' : 'Verify Key'}
             </button>
-            {keyStatus === 'valid' && <span className="text-emerald-400 font-bold">✓ Active</span>}
-            {keyStatus === 'invalid' && <span className="text-red-400 font-bold">✗ Invalid Key</span>}
+            {keyStatus === 'valid' && (
+              <span className="text-emerald-400 font-bold text-xs flex items-center gap-1">
+                <span>✓</span>
+                <span>{keyVerifyMessage || 'Active & Validated'}</span>
+              </span>
+            )}
+            {keyStatus === 'invalid' && (
+              <span className="text-red-400 font-bold text-xs flex items-center gap-1">
+                <span>✗</span>
+                <span>{keyVerifyMessage || 'Invalid Key'}</span>
+              </span>
+            )}
           </div>
         </div>
       )}
