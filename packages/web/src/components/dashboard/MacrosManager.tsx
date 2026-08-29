@@ -73,13 +73,61 @@ export default function MacrosManager() {
 
   const getTeamId = useCallback(async (): Promise<string | null> => {
     if (dbUser?.team_id) return dbUser.team_id;
-    if (user?.id) {
+
+    const targetUserId = user?.id;
+    if (targetUserId) {
       const { data } = await supabase
         .from('users')
         .select('team_id')
-        .eq('id', user.id)
+        .eq('id', targetUserId)
         .maybeSingle();
       if (data?.team_id) return data.team_id;
+    }
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData?.user;
+      if (authUser) {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('team_id')
+          .eq('id', authUser.id)
+          .maybeSingle();
+
+        if (userRow?.team_id) return userRow.team_id;
+
+        const teamName = `${authUser.email?.split('@')[0] || 'My'}'s Team`;
+        const { data: newTeam } = await supabase
+          .from('teams')
+          .insert({ name: teamName })
+          .select()
+          .single();
+
+        if (newTeam) {
+          await supabase.from('users').upsert({
+            id: authUser.id,
+            team_id: newTeam.id,
+            email: authUser.email || '',
+            full_name: authUser.email?.split('@')[0] || 'Member',
+            role: 'owner',
+          });
+          return newTeam.id;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('draftpilot_user');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.team_id) return parsed.team_id;
+        } catch {
+          // Ignore
+        }
+      }
     }
     return null;
   }, [dbUser, user]);
