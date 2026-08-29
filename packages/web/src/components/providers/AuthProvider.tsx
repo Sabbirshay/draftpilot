@@ -239,6 +239,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [handleProvision]);
 
+  // Real-time synchronization for team plan and quota updates
+  useEffect(() => {
+    if (!dbUser?.team_id) return;
+
+    const teamChannel = supabase
+      .channel(`team-live-${dbUser.team_id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${dbUser.team_id}` },
+        async (payload: any) => {
+          if (payload.new) {
+            setDbUser((prev) => {
+              if (!prev) return null;
+              const updated = {
+                ...prev,
+                teams: {
+                  ...prev.teams,
+                  ...payload.new,
+                },
+              };
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('draftpilot_user', JSON.stringify(updated));
+              }
+              return updated;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(teamChannel);
+    };
+  }, [dbUser?.team_id]);
+
   const signInWithGoogle = async () => {
     const redirectUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/auth/callback`

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { supabase } from '@/lib/supabase';
 
 interface TeamMember {
   id: string;
@@ -29,8 +30,51 @@ export default function TeamManager() {
     user?.user_metadata?.picture ||
     null;
 
-  const plan = dbUser?.teams?.plan || 'free';
-  const totalSeats = plan === 'free' ? 1 : 5;
+  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'free');
+
+  React.useEffect(() => {
+    async function fetchTeamPlan() {
+      const teamId = dbUser?.team_id;
+      if (!teamId) return;
+
+      const { data } = await supabase
+        .from('teams')
+        .select('plan, monthly_draft_limit')
+        .eq('id', teamId)
+        .maybeSingle();
+
+      if (data?.plan) {
+        setLivePlan(data.plan.toLowerCase());
+      }
+    }
+
+    if (dbUser?.team_id) {
+      fetchTeamPlan();
+    }
+
+    const teamId = dbUser?.team_id;
+    if (!teamId) return;
+
+    const channel = supabase
+      .channel(`team-manager-live-${teamId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` },
+        (payload: any) => {
+          if (payload.new?.plan) {
+            setLivePlan(payload.new.plan.toLowerCase());
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [dbUser?.team_id]);
+
+  const plan = livePlan || dbUser?.teams?.plan || 'free';
+  const totalSeats = plan === 'enterprise' ? 15 : plan === 'team' ? 5 : 1;
 
   const [invitedMembers, setInvitedMembers] = useState<TeamMember[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');

@@ -12,7 +12,8 @@ export default function BillingManager() {
   const [isAnnual, setIsAnnual] = useState(false);
 
   const [customQuota, setCustomQuota] = useState<number | null>(null);
-  const teamPlan = dbUser?.teams?.plan || 'free';
+  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'free');
+  const teamPlan = livePlan || dbUser?.teams?.plan || 'free';
   const isFreePlan = teamPlan === 'free';
   const pricePerSeat = isAnnual ? 15 : 19;
   const draftQuota = customQuota || (isFreePlan ? 50 : selectedSeats * 1000);
@@ -33,11 +34,15 @@ export default function BillingManager() {
             .from('teams')
             .select('monthly_draft_limit, plan')
             .eq('id', teamId)
-            .single(),
+            .maybeSingle(),
         ]);
 
         if (draftsRes.count !== null && draftsRes.count !== undefined) {
           setDraftsCount(draftsRes.count);
+        }
+
+        if (teamRes.data?.plan) {
+          setLivePlan(teamRes.data.plan.toLowerCase());
         }
 
         if (teamRes.data?.monthly_draft_limit) {
