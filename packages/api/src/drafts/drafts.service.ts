@@ -40,7 +40,42 @@ export class DraftsService {
       }
     }
 
-    // 3. Build prompt
+    // 3. Search knowledge base documentation chunks
+    let kbSnippets: string[] = [];
+    try {
+      const { data: chunks } = await this.supabase.getClient()
+        .from('document_chunks')
+        .select('chunk_text')
+        .eq('team_id', teamId)
+        .limit(30);
+
+      if (chunks && chunks.length > 0) {
+        const lowerThread = dto.threadContent.toLowerCase();
+        const keywords = lowerThread
+          .replace(/[^a-z0-9\s]/g, ' ')
+          .split(/\s+/)
+          .filter((w: string) => w.length > 3);
+
+        const scored = chunks.map((c: any) => {
+          const lowerChunk = c.chunk_text.toLowerCase();
+          let score = 0;
+          for (const kw of keywords) {
+            if (lowerChunk.includes(kw)) score += 1;
+          }
+          return { text: c.chunk_text, score };
+        });
+
+        kbSnippets = scored
+          .filter((s: any) => s.score > 0)
+          .sort((a: any, b: any) => b.score - a.score)
+          .slice(0, 3)
+          .map((s: any) => s.text);
+      }
+    } catch {
+      // Fallback
+    }
+
+    // 4. Build prompt
     const { data: settings } = await this.supabase.getClient()
       .from('platform_settings')
       .select('system_prompt')
@@ -50,10 +85,13 @@ export class DraftsService {
     const systemPrompt = settings?.system_prompt || 'You are a helpful customer support assistant. Draft a professional, friendly reply. Be concise.';
 
     const prompt = `${systemPrompt}
-${macroContent ? `Use this reference material: ${macroContent}` : ''}
-Customer message: ${dto.threadContent}
 
-Draft a reply:`;
+${macroContent ? `### Relevant Support Macro:\n${macroContent}\n\n` : ''}
+${kbSnippets.length > 0 ? `### Knowledge Base Documentation:\n${kbSnippets.join('\n---\n')}\n\n` : ''}
+Customer message:
+${dto.threadContent}
+
+Draft a clean, friendly reply:`;
 
     // 4. Call AI provider
     const draft = await this.ai.generateText(prompt);

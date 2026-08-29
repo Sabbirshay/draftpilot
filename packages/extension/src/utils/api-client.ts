@@ -371,6 +371,51 @@ export class ApiClient {
     return await res.json();
   }
 
+  async getKnowledgeSnippets(queryText: string): Promise<string[]> {
+    const token = await this.getToken();
+    const teamId = await this.getTeamId();
+    if (!token || !teamId || !queryText) return [];
+
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/document_chunks?team_id=eq.${teamId}&select=chunk_text&limit=40`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!res.ok) return [];
+      const chunks = (await res.json()) as { chunk_text: string }[];
+      if (!chunks || chunks.length === 0) return [];
+
+      const lowerQuery = queryText.toLowerCase();
+      const keywords = lowerQuery
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 3);
+
+      const scored = chunks.map((c) => {
+        const lowerChunk = c.chunk_text.toLowerCase();
+        let score = 0;
+        for (const kw of keywords) {
+          if (lowerChunk.includes(kw)) score += 1;
+        }
+        return { text: c.chunk_text, score };
+      });
+
+      return scored
+        .filter((s) => s.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map((s) => s.text);
+    } catch {
+      return [];
+    }
+  }
+
   async createMacro(name: string, content: string, tags?: string[]) {
     const token = await this.getToken();
     const teamId = await this.getTeamId();
@@ -469,6 +514,9 @@ export class ApiClient {
       });
     }
 
+    // 3. Fetch relevant knowledge base snippets from uploaded documentation
+    const kbSnippets = await this.getKnowledgeSnippets(scrubbed);
+
     // Extract customer first name from thread using multi-pattern parser
     const customerName = extractSenderName(threadContent);
 
@@ -514,10 +562,20 @@ CRITICAL INSTRUCTIONS:
     if (config && config.openrouter_api_key && config.openrouter_model) {
       try {
         const activeModel = config.selected_model || config.openrouter_model;
+
+        // Build comprehensive context from BOTH Macros and Knowledge Base Documents
+        let knowledgeContext = '';
+        if (matchedMacro) {
+          knowledgeContext += `### Recommended Support Macro & Policy:\n${matchedMacro.content}\n\n`;
+        }
+        if (kbSnippets.length > 0) {
+          knowledgeContext += `### Knowledge Base & Documentation Context:\n${kbSnippets.join('\n---\n')}\n\n`;
+        }
+
         const userPrompt = `Customer Message:
 ${scrubbed}
 
-${matchedMacro?.content ? `Relevant Company Knowledge / Macro:\n${matchedMacro.content}\n\n` : ''}Write the email reply to the customer now:`;
+${knowledgeContext}Write the clean, direct customer email reply now:`;
 
         const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',

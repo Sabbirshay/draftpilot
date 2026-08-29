@@ -248,6 +248,33 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
         await supabase.from('macros').insert(macroInserts);
       }
 
+      // Chunk full document text and store in document_chunks for RAG knowledge grounding
+      if (fileText && fileText.trim().length > 20) {
+        try {
+          const chunks: { document_id: string; team_id: string; chunk_text: string; chunk_index: number }[] = [];
+          const paragraphs = fileText.split(/\n\s*\n/);
+          let chunkIdx = 0;
+
+          for (const para of paragraphs) {
+            const cleanPara = para.trim();
+            if (cleanPara.length > 20) {
+              chunks.push({
+                document_id: docData.id,
+                team_id: teamId,
+                chunk_text: cleanPara.slice(0, 1000),
+                chunk_index: chunkIdx++,
+              });
+            }
+          }
+
+          if (chunks.length > 0) {
+            await supabase.from('document_chunks').insert(chunks);
+          }
+        } catch (chunkErr) {
+          console.warn('Chunk indexing note:', chunkErr);
+        }
+      }
+
       setUploadStatus(`✓ Successfully indexed ${file.name} and created ${extractedMacros.length} support macros!`);
       await loadDocuments();
       onExtractionComplete?.(extractedMacros.length);
