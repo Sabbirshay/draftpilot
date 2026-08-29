@@ -21,32 +21,39 @@ export default function BillingManager() {
 
   useEffect(() => {
     async function fetchUsage() {
-      const teamId = dbUser?.team_id;
-      if (!teamId) return;
-
       try {
-        const [draftsRes, teamRes] = await Promise.all([
-          supabase
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
+        let teamId = dbUser?.team_id;
+
+        if (token) {
+          const meRes = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            if (meData.team?.plan) {
+              setLivePlan(meData.team.plan.toLowerCase());
+            }
+            if (meData.team?.monthly_draft_limit) {
+              setCustomQuota(meData.team.monthly_draft_limit);
+            }
+            if (meData.team?.id) {
+              teamId = meData.team.id;
+            }
+          }
+        }
+
+        if (teamId) {
+          const draftsRes = await supabase
             .from('draft_history')
             .select('*', { count: 'exact', head: true })
-            .eq('team_id', teamId),
-          supabase
-            .from('teams')
-            .select('monthly_draft_limit, plan')
-            .eq('id', teamId)
-            .maybeSingle(),
-        ]);
+            .eq('team_id', teamId);
 
-        if (draftsRes.count !== null && draftsRes.count !== undefined) {
-          setDraftsCount(draftsRes.count);
-        }
-
-        if (teamRes.data?.plan) {
-          setLivePlan(teamRes.data.plan.toLowerCase());
-        }
-
-        if (teamRes.data?.monthly_draft_limit) {
-          setCustomQuota(teamRes.data.monthly_draft_limit);
+          if (draftsRes.count !== null && draftsRes.count !== undefined) {
+            setDraftsCount(draftsRes.count);
+          }
         }
       } catch (err) {
         console.warn('Could not fetch usage from Supabase:', err);

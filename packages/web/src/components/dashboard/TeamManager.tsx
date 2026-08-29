@@ -30,27 +30,44 @@ export default function TeamManager() {
     user?.user_metadata?.picture ||
     null;
 
-  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'free');
+  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'team');
 
   React.useEffect(() => {
     async function fetchTeamPlan() {
-      const teamId = dbUser?.team_id;
-      if (!teamId) return;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+        if (token) {
+          const res = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const body = await res.json();
+            if (body.team?.plan) {
+              setLivePlan(body.team.plan.toLowerCase());
+              return;
+            }
+          }
+        }
 
-      const { data } = await supabase
-        .from('teams')
-        .select('plan, monthly_draft_limit')
-        .eq('id', teamId)
-        .maybeSingle();
+        const teamId = dbUser?.team_id;
+        if (teamId) {
+          const { data } = await supabase
+            .from('teams')
+            .select('plan, monthly_draft_limit')
+            .eq('id', teamId)
+            .maybeSingle();
 
-      if (data?.plan) {
-        setLivePlan(data.plan.toLowerCase());
+          if (data?.plan) {
+            setLivePlan(data.plan.toLowerCase());
+          }
+        }
+      } catch (err) {
+        console.warn('Team plan sync note:', err);
       }
     }
 
-    if (dbUser?.team_id) {
-      fetchTeamPlan();
-    }
+    fetchTeamPlan();
 
     const teamId = dbUser?.team_id;
     if (!teamId) return;

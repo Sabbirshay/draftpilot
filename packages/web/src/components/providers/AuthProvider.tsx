@@ -51,10 +51,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Auto-provisions or retrieves user & team in Supabase
+  // Auto-provisions or retrieves user & team in Supabase via secure server route
   const handleProvision = useCallback(async (currentSession: Session) => {
     const authUser = currentSession.user;
     if (!authUser) return;
+
+    try {
+      // 1. Fetch user & team from server route /api/auth/me
+      const res = await fetch('/api/auth/me', {
+        headers: {
+          Authorization: `Bearer ${currentSession.access_token}`,
+        },
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result?.user && result?.user?.team_id) {
+          setDbUser(result.user);
+          setOnboardingState(result.onboardingState);
+          setIsFirstLogin(false);
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('draftpilot_token', currentSession.access_token);
+            localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
+          }
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('API /api/auth/me profile sync notice:', err);
+    }
 
     const email = authUser.email || '';
     const metadata = authUser.user_metadata || {};
@@ -62,27 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const avatarUrl = metadata.avatar_url || metadata.picture || null;
     const defaultTeamName = metadata.team_name || `${fullName}'s Team`;
 
+    // 2. Fallback to direct client-side Supabase query
     try {
-      // 1. Try server provision endpoint if backend API is reachable
-      const result: ProvisionResponse = await provisionUser(currentSession.access_token).catch(() => null as any);
-      if (result?.user && result?.user?.team_id) {
-        setDbUser(result.user);
-        setOnboardingState(result.onboardingState);
-        setIsFirstLogin(result.isFirstLogin);
-
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('draftpilot_token', currentSession.access_token);
-          localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
-        }
-        return;
-      }
-    } catch {
-      // Fall through to direct Supabase client sync
-    }
-
-    // 2. Direct client-side Supabase query & auto-provisioning
-    try {
-      // Check if user exists in Supabase DB
       const { data: existingUser } = await supabase
         .from('users')
         .select('*, teams(*)')
@@ -106,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           teams: existingUser.teams || {
             id: existingUser.team_id,
             name: defaultTeamName,
-            plan: 'free',
+            plan: 'team',
           },
         };
 
