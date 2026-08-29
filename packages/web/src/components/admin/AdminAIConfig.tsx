@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 const OPENROUTER_FREE_MODELS = [
+  { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B IT', provider: 'Google', badge: 'Free · High Reasoning' },
   { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning', provider: 'NVIDIA', badge: 'Free · Lightning Fast' },
   { id: 'nvidia/llama-3.1-nemotron-70b-instruct:free', name: 'NVIDIA Nemotron 70B', provider: 'NVIDIA', badge: 'Free · High Intelligence' },
   { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B Instruct', provider: 'Meta', badge: 'Free · Fast' },
