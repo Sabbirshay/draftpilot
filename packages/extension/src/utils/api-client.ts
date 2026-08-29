@@ -32,19 +32,31 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
       const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
       if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
         text = splitMatch[1].trim();
+      } else {
+        // The model output ONLY thinking steps and was truncated before writing the email!
+        return '';
       }
     }
   }
 
-  // 3. Remove leading/trailing markdown code fences (```markdown ... ```)
+  // 3. Double-check if the resulting text is still just a thinking process fragment
+  if (
+    /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(text) ||
+    text.startsWith('1.  **Analyze') ||
+    text.startsWith('1. **Analyze')
+  ) {
+    return '';
+  }
+
+  // 4. Remove leading/trailing markdown code fences (```markdown ... ```)
   text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
 
-  // 4. Remove leading meta labels like "Draft reply:" or "Here is the reply:"
+  // 5. Remove leading meta labels like "Draft reply:" or "Here is the reply:"
   text = text
     .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
     .trim();
 
-  // 5. Replace template variables with extracted customer name if still present
+  // 6. Replace template variables with extracted customer name if still present
   text = text
     .replace(/{{name}}/g, customerName)
     .replace(/{{customer_name}}/g, customerName)
@@ -456,16 +468,13 @@ export class ApiClient {
     let draftText = '';
     let openRouterSuccess = false;
 
-    // Strict system instructions to prevent internal thinking output
-    const strictSystemPrompt = `${
-      config?.system_prompt ||
-      'You are DraftPilot, an intelligent AI reply assistant for customer support. Generate a calm, polite, and concise reply based strictly on the provided thread and matched team macros.'
-    }
+    // Strict system prompt that prevents reasoning outputs
+    const strictSystemPrompt = `You are DraftPilot, an intelligent customer support assistant. You write concise, friendly, and professional email replies directly to customers based on company knowledge.
 
-CRITICAL FORMATTING INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
 1. Output ONLY the raw final email reply text.
-2. Absolutely DO NOT output any "thinking process", chain-of-thought, internal analysis steps, or markdown bullet breakdowns.
-3. Begin IMMEDIATELY with the customer greeting (e.g., "Hi ${customerName}," or "Hello,") and conclude with a warm sign-off (e.g., "Best regards,\\nSupport Team").
+2. Absolutely DO NOT output any thinking process, analysis, reasoning steps, or markdown bullets.
+3. Start directly with "Hi ${customerName}," and end with "Best regards,\\nSupport Team".
 4. Do NOT wrap in markdown code blocks.`;
 
     if (config && config.openrouter_api_key && config.openrouter_model) {
@@ -474,8 +483,7 @@ CRITICAL FORMATTING INSTRUCTIONS:
         const userPrompt = `Customer Message:
 ${scrubbed}
 
-${matchedMacro?.content ? `Knowledge Base Reference Macro:\n${matchedMacro.content}\n` : ''}
-Write the clean, direct customer email reply now:`;
+${matchedMacro?.content ? `Relevant Company Knowledge / Macro:\n${matchedMacro.content}\n\n` : ''}Write the email reply to the customer now:`;
 
         const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -491,8 +499,10 @@ Write the clean, direct customer email reply now:`;
               { role: 'system', content: strictSystemPrompt },
               { role: 'user', content: userPrompt },
             ],
-            max_tokens: config.max_tokens || 400,
+            max_tokens: Math.max(1000, Number(config.max_tokens) || 1000),
             temperature: parseFloat(config.temperature as string) || 0.4,
+            include_reasoning: false,
+            reasoning: { max_tokens: 0 },
           }),
         });
 
@@ -501,7 +511,7 @@ Write the clean, direct customer email reply now:`;
           if (openRouterData.choices && openRouterData.choices.length > 0) {
             const rawContent = openRouterData.choices[0].message.content || '';
             const cleaned = cleanAiDraft(rawContent, customerName);
-            if (cleaned.length > 10) {
+            if (cleaned && cleaned.length > 15) {
               draftText = cleaned;
               openRouterSuccess = true;
             }
@@ -512,7 +522,7 @@ Write the clean, direct customer email reply now:`;
       }
     }
 
-    // 5. High-Fidelity Fallback if OpenRouter was not configured or offline
+    // 5. High-Fidelity Grounded Fallback if OpenRouter was offline or output pure thinking
     if (!openRouterSuccess) {
       if (matchedMacro) {
         draftText = matchedMacro.content
