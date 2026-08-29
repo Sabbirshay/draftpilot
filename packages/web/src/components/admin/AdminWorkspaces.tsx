@@ -33,6 +33,18 @@ export default function AdminWorkspaces() {
   const fetchWorkspaces = useCallback(async () => {
     setIsRefreshing(true);
     try {
+      // 1. Try server API route
+      const apiRes = await fetch('/api/admin/workspaces');
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (data.workspaces) {
+          setWorkspaces(data.workspaces);
+          setLastRefreshed(new Date().toLocaleTimeString());
+          return;
+        }
+      }
+
+      // 2. Direct Supabase fallback
       const [teamsRes, draftsRes] = await Promise.all([
         supabase
           .from('teams')
@@ -41,7 +53,6 @@ export default function AdminWorkspaces() {
         supabase.from('draft_history').select('team_id'),
       ]);
 
-      // Calculate draft counts per team
       const draftCounts: Record<string, number> = {};
       if (draftsRes.data) {
         draftsRes.data.forEach((d: any) => {
@@ -123,10 +134,18 @@ export default function AdminWorkspaces() {
   const handleQuickBoost = async (ws: WorkspaceData, bonus: number) => {
     const newQuota = ws.monthlyQuota + bonus;
     try {
-      await supabase
-        .from('teams')
-        .update({ monthly_draft_limit: newQuota })
-        .eq('id', ws.id);
+      const res = await fetch('/api/admin/workspaces', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: ws.id, monthly_draft_limit: newQuota }),
+      });
+
+      if (!res.ok) {
+        await supabase
+          .from('teams')
+          .update({ monthly_draft_limit: newQuota })
+          .eq('id', ws.id);
+      }
 
       setWorkspaces((prev) =>
         prev.map((w) => (w.id === ws.id ? { ...w, monthlyQuota: newQuota } : w))
@@ -144,13 +163,25 @@ export default function AdminWorkspaces() {
     if (!editingWorkspace) return;
 
     try {
-      await supabase
-        .from('teams')
-        .update({
+      const res = await fetch('/api/admin/workspaces', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingWorkspace.id,
           monthly_draft_limit: overrideQuotaVal,
           plan: overridePlanVal.toLowerCase(),
-        })
-        .eq('id', editingWorkspace.id);
+        }),
+      });
+
+      if (!res.ok) {
+        await supabase
+          .from('teams')
+          .update({
+            monthly_draft_limit: overrideQuotaVal,
+            plan: overridePlanVal.toLowerCase(),
+          })
+          .eq('id', editingWorkspace.id);
+      }
 
       setWorkspaces((prev) =>
         prev.map((w) =>

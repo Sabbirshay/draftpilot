@@ -164,6 +164,29 @@ export class ApiClient {
     return data.teamId || null;
   }
 
+  private async getUserId(): Promise<string | null> {
+    const data = await chrome.storage.local.get(['user', 'token']);
+    if (data.user?.id) return data.user.id;
+
+    if (data.token) {
+      try {
+        const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${data.token}`,
+          },
+        });
+        if (userRes.ok) {
+          const authUser = await userRes.json();
+          return authUser?.id || null;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    return null;
+  }
+
   async login(email: string, password: string) {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
       method: 'POST',
@@ -643,24 +666,30 @@ ${knowledgeContext}Write the clean, direct customer email reply now:`;
     // 6. Save draft generation event to Supabase draft_history for live analytics
     if (token && teamId) {
       try {
-        await fetch(`${SUPABASE_URL}/rest/v1/draft_history`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-            Prefer: 'return=minimal',
-          },
-          body: JSON.stringify({
-            team_id: teamId,
-            thread_id: `gmail-thread-${Date.now()}`,
-            thread_snippet: scrubbed.slice(0, 200),
-            macro_id: matchedMacro?.id || null,
-            generated_draft: draftText,
-          }),
-        });
-      } catch {
-        // Ignore telemetry errors
+        const userId = await this.getUserId();
+        if (userId) {
+          const histRes = await fetch(`${SUPABASE_URL}/rest/v1/draft_history`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+              team_id: teamId,
+              user_id: userId,
+              thread_snippet: scrubbed.slice(0, 200),
+              generated_draft: draftText,
+              macro_used_id: matchedMacro?.id || null,
+            }),
+          });
+          if (!histRes.ok) {
+            console.warn('draft_history insert status:', histRes.status, await histRes.text());
+          }
+        }
+      } catch (err) {
+        console.warn('Telemetry logging note:', err);
       }
     }
 
@@ -677,20 +706,43 @@ ${knowledgeContext}Write the clean, direct customer email reply now:`;
     if (!token || !teamId) return { used: 0, limit: 50, draftsUsed: 0, draftsLimit: 50, plan: 'free' };
 
     try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/draft_history?team_id=eq.${teamId}&select=count`,
+      // 1. Fetch team plan & quota
+      let limit = 50;
+      let plan = 'free';
+      const teamRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/teams?id=eq.${teamId}&select=monthly_draft_limit,plan&limit=1`,
         {
           headers: {
             apikey: SUPABASE_ANON_KEY,
             Authorization: `Bearer ${token}`,
-            Range: '0-0',
-            Prefer: 'count=exact',
           },
         }
       );
-      const countHeader = res.headers.get('content-range');
-      const count = countHeader ? parseInt(countHeader.split('/')[1], 10) || 0 : 0;
-      return { used: count, limit: 50, draftsUsed: count, draftsLimit: 50, plan: 'free' };
+      if (teamRes.ok) {
+        const teams = await teamRes.json();
+        if (teams && teams[0]) {
+          limit = teams[0].monthly_draft_limit || 50;
+          plan = teams[0].plan || 'free';
+        }
+      }
+
+      // 2. Fetch draft count
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/draft_history?team_id=eq.${teamId}&select=id`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      let count = 0;
+      if (res.ok) {
+        const data = await res.json();
+        count = Array.isArray(data) ? data.length : 0;
+      }
+
+      return { used: count, limit, draftsUsed: count, draftsLimit: limit, plan };
     } catch {
       return { used: 0, limit: 50, draftsUsed: 0, draftsLimit: 50, plan: 'free' };
     }

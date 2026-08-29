@@ -11,25 +11,37 @@ export default function BillingManager() {
   const [selectedSeats, setSelectedSeats] = useState(1);
   const [isAnnual, setIsAnnual] = useState(false);
 
+  const [customQuota, setCustomQuota] = useState<number | null>(null);
   const teamPlan = dbUser?.teams?.plan || 'free';
   const isFreePlan = teamPlan === 'free';
   const pricePerSeat = isAnnual ? 15 : 19;
-  const draftQuota = isFreePlan ? 50 : selectedSeats * 1000;
+  const draftQuota = customQuota || (isFreePlan ? 50 : selectedSeats * 1000);
   const quotaPercent = Math.min(100, Math.round((draftsCount / draftQuota) * 100));
 
   useEffect(() => {
     async function fetchUsage() {
-      const teamId = dbUser?.team_id || user?.id;
+      const teamId = dbUser?.team_id;
       if (!teamId) return;
 
       try {
-        const { count } = await supabase
-          .from('draft_history')
-          .select('*', { count: 'exact', head: true })
-          .eq('team_id', teamId);
+        const [draftsRes, teamRes] = await Promise.all([
+          supabase
+            .from('draft_history')
+            .select('*', { count: 'exact', head: true })
+            .eq('team_id', teamId),
+          supabase
+            .from('teams')
+            .select('monthly_draft_limit, plan')
+            .eq('id', teamId)
+            .single(),
+        ]);
 
-        if (count !== null) {
-          setDraftsCount(count);
+        if (draftsRes.count !== null && draftsRes.count !== undefined) {
+          setDraftsCount(draftsRes.count);
+        }
+
+        if (teamRes.data?.monthly_draft_limit) {
+          setCustomQuota(teamRes.data.monthly_draft_limit);
         }
       } catch (err) {
         console.warn('Could not fetch usage from Supabase:', err);
@@ -37,7 +49,23 @@ export default function BillingManager() {
     }
 
     fetchUsage();
-  }, [dbUser, user]);
+    const interval = setInterval(fetchUsage, 6000);
+
+    const channel = supabase
+      .channel('user-billing-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_history' }, () => {
+        fetchUsage();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        fetchUsage();
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [dbUser]);
 
   const handleOpenPortal = () => {
     setIsLoadingPortal(true);

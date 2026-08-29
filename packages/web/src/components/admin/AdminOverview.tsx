@@ -31,6 +31,25 @@ export default function AdminOverview({
   const fetchLiveMetrics = useCallback(async () => {
     setIsRefreshing(true);
     try {
+      // 1. Try server-side API route (which has superadmin service_role access)
+      const apiRes = await fetch('/api/admin/metrics');
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        setLiveStats({
+          totalTeams: data.totalTeams || 1,
+          totalUsers: data.totalUsers || 1,
+          totalDrafts: data.totalDrafts || 0,
+          totalMacros: data.totalMacros || 0,
+          totalDocs: data.totalDocs || 0,
+        });
+        if (data.recentDrafts) {
+          setRecentDrafts(data.recentDrafts);
+        }
+        setLastRefreshed(new Date().toLocaleTimeString());
+        return;
+      }
+
+      // 2. Direct Supabase fallback
       const [teamsRes, usersRes, draftsRes, macrosRes, docsRes, recentDraftsRes] = await Promise.all([
         supabase.from('teams').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }),
