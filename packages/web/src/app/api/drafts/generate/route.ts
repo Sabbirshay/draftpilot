@@ -68,6 +68,9 @@ function extractSenderName(text: string): string {
   return 'there';
 }
 
+// In-memory sliding-window rate limiter (20 requests / 60 seconds per user)
+const userRequestTimestamps = new Map<string, number[]>();
+
 export async function POST(req: NextRequest) {
   // 1. Authenticate Caller
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
@@ -82,6 +85,18 @@ export async function POST(req: NextRequest) {
   }
 
   const user = authData.user;
+
+  // 2. Rate Limiting Check (20 requests per 60 seconds)
+  const now = Date.now();
+  const timestamps = (userRequestTimestamps.get(user.id) || []).filter((t) => now - t < 60000);
+  if (timestamps.length >= 20) {
+    return NextResponse.json(
+      { error: 'Too Many Requests: Rate limit exceeded (max 20 drafts/min). Please slow down.' },
+      { status: 429 }
+    );
+  }
+  timestamps.push(now);
+  userRequestTimestamps.set(user.id, timestamps);
 
   try {
     const body = await req.json();
