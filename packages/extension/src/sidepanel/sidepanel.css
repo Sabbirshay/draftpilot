@@ -163,19 +163,34 @@ input:focus, textarea:focus {
 
 /* Header */
 header {
+  margin-bottom: 20px;
+}
+.header-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
 }
 .brand {
   font-weight: 700;
   font-size: 18px;
-}
-.header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+.brand-icon {
+  font-size: 16px;
+}
+.header-user-bar {
+  margin-top: 4px;
+  padding: 4px 0;
+}
+.user-email-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Usage Badge */
@@ -262,6 +277,18 @@ header {
   min-height: 100px;
   white-space: pre-wrap;
   margin-top: 8px;
+  cursor: text;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.draft-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+.draft-box:empty::before {
+  content: 'AI draft will appear here...';
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .action-buttons {

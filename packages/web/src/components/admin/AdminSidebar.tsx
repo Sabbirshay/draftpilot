@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 export type AdminTab =
   | 'overview'
@@ -25,6 +26,17 @@ export default function AdminSidebar({
   searchQuery,
   onSearchChange,
 }: AdminSidebarProps) {
+  const { user, dbUser, signOut } = useAuth();
+
+  const adminEmail = user?.email || dbUser?.email || 'admin@draftpilot.app';
+  const adminName = dbUser?.full_name || adminEmail.split('@')[0];
+  const initials = adminName.slice(0, 2).toUpperCase();
+
+  const handleLockConsole = () => {
+    sessionStorage.removeItem('draftpilot_admin_unlocked');
+    window.location.reload();
+  };
+
   return (
     <aside className="w-full lg:w-64 flex flex-col justify-between p-5 bg-elevated/80 border-r border-border/70 rounded-3xl lg:rounded-none lg:min-h-screen">
       <div>
@@ -47,13 +59,13 @@ export default function AdminSidebar({
           </Link>
         </div>
 
-        {/* Admin Profile Pill matching Reference UI */}
+        {/* Admin Profile Pill */}
         <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-bg/80 border border-border/80 mb-5 shadow-sm">
           <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-accent via-purple-500 to-pink-500 flex items-center justify-center text-xs font-bold text-white shadow">
-            AD
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-text truncate">Hello, Admin</p>
+            <p className="text-xs font-bold text-text truncate">{adminName}</p>
             <p className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Root Authority
@@ -168,8 +180,15 @@ export default function AdminSidebar({
         </nav>
       </div>
 
-      {/* Footer link to public customer dashboard */}
+      {/* Footer links & Lock Console */}
       <div className="pt-6 border-t border-border/50 mt-6 space-y-2">
+        <button
+          onClick={handleLockConsole}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left"
+        >
+          <span>🔒</span>
+          <span>Lock Admin Console</span>
+        </button>
         <Link
           href="/dashboard"
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-text-muted hover:text-text hover:bg-white/5 transition-colors"

@@ -212,6 +212,20 @@ class SidePanel {
     document.getElementById('billing-btn')?.addEventListener('click', () => {
       window.open('https://draftpilot-web.vercel.app/dashboard', '_blank');
     });
+
+    // Sync editable draft content back to currentDraft
+    document.getElementById('draft-content')?.addEventListener('input', () => {
+      const contentDiv = document.getElementById('draft-content');
+      if (contentDiv) {
+        this.currentDraft = contentDiv.innerText;
+      }
+    });
+
+    // Macro search filtering
+    document.getElementById('macro-search')?.addEventListener('input', (e) => {
+      const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+      this.filterMacros(query);
+    });
   }
 
   private showError(msg: string) {
@@ -267,62 +281,31 @@ class SidePanel {
   private async loadMacros() {
     try {
       this.macros = await apiClient.getMacros();
-      const listEl = document.getElementById('macros-list');
-      const emptyEl = document.getElementById('macros-empty');
-      const quickListEl = document.getElementById('quick-macros-list');
-      const countChipEl = document.getElementById('macros-count-chip');
 
-      if (countChipEl) countChipEl.innerText = `${this.macros.length} loaded`;
+      // Clear search when reloading
+      const searchInput = document.getElementById('macro-search') as HTMLInputElement;
+      if (searchInput) searchInput.value = '';
 
-      // 1. Populate Quick Macros on Draft Tab
-      if (quickListEl) {
-        if (this.macros.length === 0) {
-          quickListEl.innerHTML = '<span style="font-size: 10px; color: #6b7280;">No macros added yet</span>';
-        } else {
-          quickListEl.innerHTML = this.macros
-            .slice(0, 6)
-            .map(
-              (m) => `
-            <button class="quick-macro-chip" data-id="${m.id}" style="padding: 4px 8px; font-size: 10px; font-weight: 600; border-radius: 6px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3); color: #c4b5fd; cursor: pointer; transition: all 0.2s;">
-              ⚡ ${m.name}
-            </button>
-          `
-            )
-            .join('');
+      this.renderMacrosList(this.macros);
+    } catch {
+      // Ignore
+    }
+  }
 
-          quickListEl.querySelectorAll('.quick-macro-chip').forEach((btn) => {
-            btn.addEventListener('click', async (e) => {
-              const target = e.currentTarget as HTMLElement;
-              const id = target.dataset.id;
-              const macro = this.macros.find((m) => m.id === id);
-              if (macro) {
-                const formatted = macro.content
-                  .replace(/{{name}}/g, this.customerName)
-                  .replace(/{{customer_name}}/g, this.customerName)
-                  .replace(/\[Customer\]/g, this.customerName);
+  private renderMacrosList(macrosToRender: any[]) {
+    const listEl = document.getElementById('macros-list');
+    const emptyEl = document.getElementById('macros-empty');
 
-                const orig = target.innerText;
-                target.innerText = '✓ Inserting...';
-                await this.insertTextIntoGmailTab(formatted);
-                target.innerText = '✓ Inserted!';
-                setTimeout(() => (target.innerText = orig), 2000);
-              }
-            });
-          });
-        }
-      }
+    if (!listEl || !emptyEl) return;
 
-      // 2. Populate Full Macros Tab
-      if (!listEl || !emptyEl) return;
-
-      if (this.macros.length === 0) {
-        listEl.innerHTML = '';
-        emptyEl.classList.remove('hidden');
-      } else {
-        emptyEl.classList.add('hidden');
-        listEl.innerHTML = this.macros
-          .map(
-            (m) => `
+    if (macrosToRender.length === 0) {
+      listEl.innerHTML = '';
+      emptyEl.classList.remove('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+      listEl.innerHTML = macrosToRender
+        .map(
+          (m) => `
           <div class="card macro-item mt-2" style="padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
               <strong style="font-size: 12px; color: #f3f4f6;">${m.name}</strong>
@@ -334,43 +317,56 @@ class SidePanel {
             </button>
           </div>
         `
-          )
-          .join('');
+        )
+        .join('');
 
-        // Attach click listeners for "Insert Macro" buttons
-        listEl.querySelectorAll('.btn-use-macro').forEach((btn) => {
-          btn.addEventListener('click', async (e) => {
-            const target = e.currentTarget as HTMLElement;
-            const id = target.dataset.id;
-            const macro = this.macros.find((m) => m.id === id);
-            if (macro) {
-              const formatted = macro.content
-                .replace(/{{name}}/g, this.customerName)
-                .replace(/{{customer_name}}/g, this.customerName)
-                .replace(/\[Customer\]/g, this.customerName);
+      // Attach click listeners for "Insert Macro" buttons
+      listEl.querySelectorAll('.btn-use-macro').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const target = e.currentTarget as HTMLElement;
+          const id = target.dataset.id;
+          const macro = this.macros.find((m) => m.id === id);
+          if (macro) {
+            const formatted = macro.content
+              .replace(/{{name}}/g, this.customerName)
+              .replace(/{{customer_name}}/g, this.customerName)
+              .replace(/\[Customer\]/g, this.customerName);
 
-              target.innerText = '✓ Inserting into Gmail...';
-              await this.insertTextIntoGmailTab(formatted);
-              target.innerText = '✓ Inserted into Gmail Reply!';
-              setTimeout(() => (target.innerText = '⚡ Insert Macro into Gmail Reply'), 2500);
-            }
-          });
+            target.innerText = '✓ Inserting into Gmail...';
+            await this.insertTextIntoGmailTab(formatted);
+            target.innerText = '✓ Inserted into Gmail Reply!';
+            setTimeout(() => (target.innerText = '⚡ Insert Macro into Gmail Reply'), 2500);
+          }
         });
+      });
 
-        // Attach delete listeners
-        listEl.querySelectorAll('.delete-macro').forEach((btn) => {
-          btn.addEventListener('click', async (e) => {
-            const id = (e.target as HTMLElement).dataset.id;
-            if (id && confirm('Delete this macro?')) {
-              await apiClient.deleteMacro(id);
-              this.loadMacros();
-            }
-          });
+      // Attach delete listeners
+      listEl.querySelectorAll('.delete-macro').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const id = (e.target as HTMLElement).dataset.id;
+          if (id && confirm('Delete this macro?')) {
+            await apiClient.deleteMacro(id);
+            this.loadMacros();
+          }
         });
-      }
-    } catch {
-      // Ignore
+      });
     }
+  }
+
+  private filterMacros(query: string) {
+    if (!query) {
+      this.renderMacrosList(this.macros);
+      return;
+    }
+
+    const filtered = this.macros.filter((m) => {
+      const name = (m.name || '').toLowerCase();
+      const content = (m.content || '').toLowerCase();
+      const tags = (m.tags || []).join(' ').toLowerCase();
+      return name.includes(query) || content.includes(query) || tags.includes(query);
+    });
+
+    this.renderMacrosList(filtered);
   }
 
   private handleThreadDetected(text: string) {
