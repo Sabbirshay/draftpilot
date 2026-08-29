@@ -7,10 +7,39 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
   const port = process.env.PORT || 3001;
-  const extensionOrigin = process.env.EXTENSION_ORIGIN || '*';
-  
+  const allowedOrigins: (string | RegExp)[] = [
+    'https://draftpilot-web.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    /^chrome-extension:\/\/[a-z]{32}$/,
+  ];
+
+  if (process.env.WEB_ORIGIN) {
+    allowedOrigins.push(process.env.WEB_ORIGIN);
+  }
+  if (process.env.EXTENSION_ORIGIN && process.env.EXTENSION_ORIGIN !== '*') {
+    allowedOrigins.push(process.env.EXTENSION_ORIGIN);
+  }
+
   app.enableCors({
-    origin: extensionOrigin,
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const isAllowed = allowedOrigins.some((allowed) => {
+        if (typeof allowed === 'string') {
+          return allowed === origin;
+        }
+        return allowed.test(origin);
+      });
+
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS policy rejection: Origin ${origin} is not allowed.`));
+      }
+    },
     credentials: true,
   });
 
