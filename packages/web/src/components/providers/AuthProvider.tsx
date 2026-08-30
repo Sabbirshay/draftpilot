@@ -58,7 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       // 1. Fetch user & team from server route /api/auth/me
-      const res = await fetch('/api/auth/me', {
+      const res = await fetch(`/api/auth/me?t=${Date.now()}`, {
+        cache: 'no-store',
         headers: {
           Authorization: `Bearer ${currentSession.access_token}`,
         },

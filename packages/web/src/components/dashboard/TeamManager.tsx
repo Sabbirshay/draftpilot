@@ -38,7 +38,8 @@ export default function TeamManager() {
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
         if (token) {
-          const res = await fetch('/api/auth/me', {
+          const res = await fetch(`/api/auth/me?t=${Date.now()}`, {
+            cache: 'no-store',
             headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {

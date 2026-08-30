@@ -28,7 +28,8 @@ export default function BillingManager() {
         let teamId = dbUser?.team_id;
 
         if (token) {
-          const meRes = await fetch('/api/auth/me', {
+          const meRes = await fetch(`/api/auth/me?t=${Date.now()}`, {
+            cache: 'no-store',
             headers: { Authorization: `Bearer ${token}` },
           });
           if (meRes.ok) {
