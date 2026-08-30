@@ -5,11 +5,10 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 const OPENROUTER_FREE_MODELS = [
-  { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B IT', provider: 'Google', badge: 'Free · High Reasoning' },
+  { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free)', provider: 'Google', badge: 'Free · DeepMind MoE' },
   { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning', provider: 'NVIDIA', badge: 'Free · Lightning Fast' },
-  { id: 'nvidia/llama-3.1-nemotron-70b-instruct:free', name: 'NVIDIA Nemotron 70B', provider: 'NVIDIA', badge: 'Free · High Intelligence' },
-  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B Instruct', provider: 'Meta', badge: 'Free · Fast' },
   { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct', provider: 'Meta', badge: 'Free · SOTA' },
+  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B Instruct', provider: 'Meta', badge: 'Free · Fast' },
   { id: 'google/gemma-2-9b-it:free', name: 'Gemma 2 9B IT', provider: 'Google', badge: 'Free · Balanced' },
   { id: 'mistralai/mistral-7b-instruct:free', name: 'Mistral 7B Instruct', provider: 'Mistral', badge: 'Free · Efficient' },
   { id: 'microsoft/phi-3-mini-128k-instruct:free', name: 'Phi-3 Mini 128K', provider: 'Microsoft', badge: 'Free · Compact' },
@@ -624,16 +623,55 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
               </button>
 
               {testResponse && (
-                <div className="mt-3 p-4 rounded-2xl bg-bg border border-border space-y-2">
+                <div className={`mt-3 p-4 rounded-2xl bg-bg border ${testResponse.startsWith('Rate limit') || testResponse.startsWith('Error') ? 'border-amber-500/40 bg-amber-500/5' : 'border-border'} space-y-2`}>
                   <div className="flex items-center justify-between text-[10px] text-text-dim">
-                    <span>Generated Reply Output</span>
-                    <span className="font-mono text-emerald-400">
-                      Tokens: {testMetrics.tokens} • {testMetrics.latency.toFixed(2)}s
+                    <span className={testResponse.startsWith('Rate limit') ? 'text-amber-400 font-bold' : ''}>
+                      {testResponse.startsWith('Rate limit') ? '⚠️ OpenRouter Free Tier Limit Notice' : 'Generated Reply Output'}
                     </span>
+                    {testMetrics.tokens > 0 && (
+                      <span className="font-mono text-emerald-400">
+                        Tokens: {testMetrics.tokens} • {testMetrics.latency.toFixed(2)}s
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs font-mono text-text-muted whitespace-pre-wrap leading-relaxed">
-                    {testResponse}
-                  </p>
+                  
+                  {testResponse.startsWith('Rate limit') ? (
+                    <div className="space-y-2.5 pt-1">
+                      <p className="text-xs font-mono text-amber-300 leading-relaxed">
+                        {testResponse}
+                      </p>
+                      <div className="p-3 rounded-xl bg-elevated/80 border border-border/80 text-[11px] text-text-muted space-y-1.5">
+                        <p className="font-semibold text-text">💡 Why is this happening?</p>
+                        <p>OpenRouter limits accounts with <strong className="text-text font-mono">$0 credit balance</strong> to a daily quota on <code className="text-accent-light font-mono">:free</code> models.</p>
+                        <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                          <a
+                            href="https://openrouter.ai/credits"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white font-bold text-[10px] hover:bg-accent-hover transition-colors"
+                          >
+                            <span>Add $10 Credits to unlock 1,000 Free/Day</span>
+                            <span>↗</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenrouterModel('meta-llama/llama-3.1-8b-instruct:free');
+                              setCustomOpenrouterModel('');
+                              setTestResponse('Switched to Llama 3.1 8B Instruct (Free). Click "Generate Test AI Reply" above to test.');
+                            }}
+                            className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg bg-elevated border border-border text-text-muted hover:text-text font-medium text-[10px] transition-colors"
+                          >
+                            Switch to Llama 3.1 8B (Free)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs font-mono text-text-muted whitespace-pre-wrap leading-relaxed">
+                      {testResponse}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
