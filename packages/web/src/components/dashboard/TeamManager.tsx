@@ -30,7 +30,7 @@ export default function TeamManager() {
     user?.user_metadata?.picture ||
     null;
 
-  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'team');
+  const [livePlan, setLivePlan] = useState<string>(dbUser?.teams?.plan || 'free');
 
   React.useEffect(() => {
     async function fetchTeamPlan() {

@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           teams: existingUser.teams || {
             id: existingUser.team_id,
             name: defaultTeamName,
-            plan: 'team',
+            plan: 'free',
           },
         };
 
