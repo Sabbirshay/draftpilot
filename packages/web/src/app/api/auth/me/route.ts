@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://amjliubpbysvtiqpbgnh.supabase.co';
 const serviceRoleKey =
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
     // 1. Fetch user from DB
     let { data: existingUser } = await supabaseAdmin
       .from('users')
-      .select('*, teams(*)')
+      .select('*')
       .eq('id', authUser.id)
       .maybeSingle();
 
@@ -60,16 +61,16 @@ export async function GET(req: NextRequest) {
           avatar_url: avatarUrl,
           role: 'owner',
         })
-        .select('*, teams(*)')
+        .select('*')
         .single();
 
       if (userErr) throw userErr;
-      existingUser = newUser;
+      existingUser = { ...newUser, teams: newTeam };
 
       // Create onboarding state
       await supabaseAdmin.from('onboarding_state').insert({ team_id: newTeam.id });
-    } else if (existingUser.team_id && !existingUser.teams) {
-      // Fetch team explicitly if relation join was null
+    } else if (existingUser.team_id) {
+      // Fetch fresh team directly from teams table
       const { data: teamData } = await supabaseAdmin
         .from('teams')
         .select('*')
@@ -95,6 +96,12 @@ export async function GET(req: NextRequest) {
         first_macro_added: false,
         extension_installed: false,
         viewed_demo: false,
+      },
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
     });
   } catch (err: any) {
