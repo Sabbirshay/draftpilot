@@ -146,12 +146,17 @@ export default function AdminWorkspaces() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-admin-passkey': 'draftpilot-root-2026',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/admin/workspaces', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         body: JSON.stringify({ id: ws.id, monthly_draft_limit: newQuota }),
       });
 
@@ -181,12 +186,17 @@ export default function AdminWorkspaces() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-admin-passkey': 'draftpilot-root-2026',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/admin/workspaces', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         body: JSON.stringify({
           id: editingWorkspace.id,
           monthly_draft_limit: overrideQuotaVal,
