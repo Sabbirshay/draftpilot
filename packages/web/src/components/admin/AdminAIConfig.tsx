@@ -5,16 +5,8 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 const OPENROUTER_FREE_MODELS = [
-  { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free)', provider: 'Google', badge: 'Free · DeepMind MoE' },
-  { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning', provider: 'NVIDIA', badge: 'Free · Lightning Fast' },
-  { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct', provider: 'Meta', badge: 'Free · SOTA' },
-  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B Instruct', provider: 'Meta', badge: 'Free · Fast' },
-  { id: 'google/gemma-2-9b-it:free', name: 'Gemma 2 9B IT', provider: 'Google', badge: 'Free · Balanced' },
-  { id: 'mistralai/mistral-7b-instruct:free', name: 'Mistral 7B Instruct', provider: 'Mistral', badge: 'Free · Efficient' },
-  { id: 'microsoft/phi-3-mini-128k-instruct:free', name: 'Phi-3 Mini 128K', provider: 'Microsoft', badge: 'Free · Compact' },
-  { id: 'qwen/qwen-2-7b-instruct:free', name: 'Qwen 2 7B Instruct', provider: 'Alibaba', badge: 'Free · Multilingual' },
-  { id: 'nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free', name: 'Nous Hermes 2 Mixtral', provider: 'NousResearch', badge: 'Free · Powerful' },
-  { id: 'openchat/openchat-7b:free', name: 'OpenChat 7B', provider: 'OpenChat', badge: 'Free · Chat' },
+  { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B A4B IT', provider: 'Google DeepMind', badge: 'Free · MoE Architecture' },
+  { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B IT', provider: 'Google DeepMind', badge: 'Free · High Reasoning' },
 ];
 
 export default function AdminAIConfig() {
@@ -23,7 +15,7 @@ export default function AdminAIConfig() {
   
   // Settings
   const [openrouterKey, setOpenrouterKey] = useState('');
-  const [openrouterModel, setOpenrouterModel] = useState('nvidia/nemotron-3.5-lightning:free');
+  const [openrouterModel, setOpenrouterModel] = useState('google/gemma-4-26b-a4b-it:free');
   const [customOpenrouterModel, setCustomOpenrouterModel] = useState('');
   
   const [openaiKey, setOpenaiKey] = useState('');
@@ -296,8 +288,14 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
     const start = Date.now();
 
     try {
-      const activeModel = customOpenrouterModel.trim() || openrouterModel;
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const activeModel = customOpenrouterModel.trim() || openrouterModel || 'google/gemma-4-26b-a4b-it:free';
+      const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+
+      let usedModel = activeModel;
+      let isFallback = false;
+
+      // 1. Try Primary Model
+      let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${openrouterKey.trim()}`,
@@ -316,10 +314,42 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         }),
       });
 
-      const data = await response.json();
+      let data = await response.json().catch(() => null);
+
+      // 2. If Primary Model fails (e.g. rate limit, 429, 500), automatically attempt Fallback Model
+      if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
+        console.warn(`Primary model ${activeModel} returned ${response.status}. Attempting auto-fallback to ${fallbackModel}...`);
+        const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openrouterKey.trim()}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://draftpilot-web.vercel.app',
+            'X-Title': 'DraftPilot Admin Playground',
+          },
+          body: JSON.stringify({
+            model: fallbackModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: testThread },
+            ],
+            temperature: temperature,
+            max_tokens: maxTokens,
+          }),
+        });
+
+        const fallbackData = await fallbackRes.json().catch(() => null);
+        if (fallbackRes.ok && fallbackData?.choices?.[0]) {
+          response = fallbackRes;
+          data = fallbackData;
+          usedModel = fallbackModel;
+          isFallback = true;
+        }
+      }
+
       const latency = (Date.now() - start) / 1000;
 
-      if (data.choices && data.choices[0]) {
+      if (data?.choices && data.choices[0]) {
         const rawContent = data.choices[0].message.content || '';
         let cleaned = rawContent.trim().replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         if (
@@ -344,13 +374,14 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
           .trim();
 
-        setTestResponse(cleaned || rawContent);
+        const prefix = isFallback ? `[⚡ Auto-Fallback Active: Generated with ${usedModel}]\n\n` : '';
+        setTestResponse(prefix + (cleaned || rawContent));
         setTestMetrics({
           tokens: data.usage?.total_tokens || 0,
           latency: latency,
         });
       } else {
-        setTestResponse(data.error?.message || JSON.stringify(data, null, 2));
+        setTestResponse(data?.error?.message || JSON.stringify(data, null, 2));
       }
     } catch (err: any) {
       setTestResponse(`Error: ${err.message}`);

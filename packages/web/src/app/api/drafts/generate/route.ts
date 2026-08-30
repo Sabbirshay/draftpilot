@@ -134,7 +134,9 @@ CRITICAL INSTRUCTIONS:
 
     if (settings && settings.openrouter_api_key) {
       try {
-        const activeModel = settings.selected_model || settings.openrouter_model || 'google/gemma-4-31b-it:free';
+        const activeModel = settings.selected_model || settings.openrouter_model || 'google/gemma-4-26b-a4b-it:free';
+        const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+
         let knowledgeContext = '';
         if (matchedMacro?.content) {
           knowledgeContext += `### Recommended Support Macro & Policy:\n${matchedMacro.content}\n\n`;
@@ -145,7 +147,8 @@ CRITICAL INSTRUCTIONS:
 
         const userPrompt = `Customer Message:\n${threadContent}\n\n${knowledgeContext}Write the clean, direct customer email reply now:`;
 
-        const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // 1. Try Primary Model
+        let openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -166,15 +169,45 @@ CRITICAL INSTRUCTIONS:
           }),
         });
 
-        if (openrouterRes.ok) {
-          const openRouterData = await openrouterRes.json();
-          if (openRouterData.choices && openRouterData.choices.length > 0) {
-            const rawContent = openRouterData.choices[0].message.content || '';
-            const cleaned = cleanAiDraft(rawContent, customerName);
-            if (cleaned && cleaned.length > 15) {
-              draftText = cleaned;
-              openRouterSuccess = true;
-            }
+        let openRouterData = await openrouterRes.json().catch(() => null);
+
+        // 2. If Primary fails, attempt Automatic Fallback Model
+        if ((!openrouterRes.ok || !openRouterData?.choices?.[0]) && fallbackModel !== activeModel) {
+          console.warn(`Primary model ${activeModel} failed (${openrouterRes.status}). Attempting auto-fallback to ${fallbackModel}...`);
+          const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${settings.openrouter_api_key}`,
+              'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+              'X-Title': 'DraftPilot',
+            },
+            body: JSON.stringify({
+              model: fallbackModel,
+              messages: [
+                { role: 'system', content: strictSystemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              max_tokens: Math.max(1000, Number(settings.max_tokens) || 1000),
+              temperature: parseFloat(settings.temperature as string) || 0.4,
+              include_reasoning: false,
+              reasoning: { max_tokens: 0 },
+            }),
+          });
+
+          const fallbackData = await fallbackRes.json().catch(() => null);
+          if (fallbackRes.ok && fallbackData?.choices?.[0]) {
+            openrouterRes = fallbackRes;
+            openRouterData = fallbackData;
+          }
+        }
+
+        if (openRouterData?.choices && openRouterData.choices.length > 0) {
+          const rawContent = openRouterData.choices[0].message?.content || '';
+          const cleaned = cleanAiDraft(rawContent, customerName);
+          if (cleaned && cleaned.length > 15) {
+            draftText = cleaned;
+            openRouterSuccess = true;
           }
         }
       } catch (aiErr) {

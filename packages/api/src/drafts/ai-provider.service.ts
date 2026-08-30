@@ -65,8 +65,12 @@ export class AiProviderService {
     this.logger.log(`Using AI Provider: ${provider}`);
 
     if (provider === 'openrouter' && settings?.openrouter_api_key) {
+      const activeModel = settings?.selected_model || settings?.openrouter_model || 'google/gemma-4-26b-a4b-it:free';
+      const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+
       try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // 1. Try Primary Model
+        let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${settings.openrouter_api_key}`,
@@ -75,7 +79,7 @@ export class AiProviderService {
             'X-Title': 'DraftPilot'
           },
           body: JSON.stringify({
-            model: model,
+            model: activeModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: prompt }
@@ -85,15 +89,43 @@ export class AiProviderService {
           })
         });
 
-        if (response.ok) {
-          const data = await response.json() as any;
-          const content = data.choices?.[0]?.message?.content?.trim();
-          if (content) {
-            const cleaned = this.cleanDraft(content);
-            if (cleaned.length > 5) return cleaned;
+        let data = await response.json().catch(() => null) as any;
+
+        // 2. If Primary fails, attempt Automatic Fallback Model
+        if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
+          this.logger.warn(`Primary model ${activeModel} failed (${response.status}). Attempting auto-fallback to ${fallbackModel}...`);
+          const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${settings.openrouter_api_key}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+              'X-Title': 'DraftPilot'
+            },
+            body: JSON.stringify({
+              model: fallbackModel,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt }
+              ],
+              max_tokens: maxTokens,
+              temperature: temp
+            })
+          });
+
+          const fallbackData = await fallbackRes.json().catch(() => null) as any;
+          if (fallbackRes.ok && fallbackData?.choices?.[0]) {
+            response = fallbackRes;
+            data = fallbackData;
           }
+        }
+
+        if (data?.choices?.[0]?.message?.content) {
+          const content = data.choices[0].message.content.trim();
+          const cleaned = this.cleanDraft(content);
+          if (cleaned.length > 5) return cleaned;
         } else {
-          this.logger.warn(`OpenRouter API call failed with status: ${response.status}`);
+          this.logger.warn(`OpenRouter generation failed on all models. Falling back to Smart Simulator.`);
         }
       } catch (error: any) {
         this.logger.warn(`OpenRouter API call failed (${error.message}). Falling back to Smart Simulator.`);
