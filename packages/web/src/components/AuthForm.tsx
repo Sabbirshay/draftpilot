@@ -20,6 +20,37 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const handleForgotPassword = async () => {
+    setError(null);
+    setSuccessMessage(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      setError('Please enter your email address in the field above to receive a password reset link.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const redirectUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/login?reset=true`
+        : undefined;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (error) throw error;
+      setSuccessMessage(`Password reset link sent to ${trimmedEmail}! Please check your inbox and spam folder.`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset email. Please verify your email and try again.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -299,10 +330,11 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                 {mode === 'signin' && (
                   <button
                     type="button"
-                    onClick={() => alert('Password reset link sent to your registered email.')}
-                    className="text-xs font-medium text-accent hover:text-accent-light transition-colors"
+                    onClick={handleForgotPassword}
+                    disabled={resetLoading}
+                    className="text-xs font-medium text-accent hover:text-accent-light transition-colors disabled:opacity-50 cursor-pointer"
                   >
-                    Forgot password
+                    {resetLoading ? 'Sending link...' : 'Forgot password'}
                   </button>
                 )}
               </div>

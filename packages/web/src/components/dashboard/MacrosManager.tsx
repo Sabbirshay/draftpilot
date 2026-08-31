@@ -63,6 +63,7 @@ export default function MacrosManager() {
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
   const [isImportingStarters, setIsImportingStarters] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
 
   // New Custom Macro Form State
   const [newName, setNewName] = useState('');
@@ -166,9 +167,82 @@ export default function MacrosManager() {
     }
   }, [getTeamId]);
 
+  // Initial fetch and Realtime subscription for cross-party sync (admin broadcasts & extension creations)
   useEffect(() => {
-    fetchMacros();
-  }, [fetchMacros]);
+    let isMounted = true;
+    let activeChannel: any = null;
+
+    async function initAndSubscribe() {
+      await fetchMacros();
+      const activeTeamId = await getTeamId();
+      if (!activeTeamId || !isMounted) return;
+
+      activeChannel = supabase
+        .channel(`team-macros-realtime-${activeTeamId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'macros',
+            filter: `team_id=eq.${activeTeamId}`,
+          },
+          (payload) => {
+            if (!isMounted) return;
+            if (payload.eventType === 'INSERT') {
+              const d = payload.new as any;
+              const newMacro: MacroItem = {
+                id: d.id,
+                name: d.name,
+                category: d.category || 'General',
+                tags: Array.isArray(d.tags) ? d.tags : [],
+                content: d.content,
+                usageCount: d.usage_count || 0,
+                lastUpdated: 'Just now',
+              };
+              setMacros((prev) => {
+                if (prev.some((m) => m.id === newMacro.id)) return prev;
+                return [newMacro, ...prev];
+              });
+              setSyncNotice(`⚡ Live macro update: "${newMacro.name}" synced to your knowledge base!`);
+              setTimeout(() => setSyncNotice(null), 4000);
+            } else if (payload.eventType === 'UPDATE') {
+              const d = payload.new as any;
+              setMacros((prev) =>
+                prev.map((m) =>
+                  m.id === d.id
+                    ? {
+                        ...m,
+                        name: d.name,
+                        category: d.category || 'General',
+                        tags: Array.isArray(d.tags) ? d.tags : [],
+                        content: d.content,
+                        usageCount: d.usage_count !== undefined ? d.usage_count : m.usageCount,
+                        lastUpdated: 'Just now',
+                      }
+                    : m
+                )
+              );
+            } else if (payload.eventType === 'DELETE') {
+              const d = payload.old as any;
+              if (d?.id) {
+                setMacros((prev) => prev.filter((m) => m.id !== d.id));
+              }
+            }
+          }
+        )
+        .subscribe();
+    }
+
+    initAndSubscribe();
+
+    return () => {
+      isMounted = false;
+      if (activeChannel) {
+        supabase.removeChannel(activeChannel);
+      }
+    };
+  }, [fetchMacros, getTeamId]);
 
   const categories = [
     'All',
@@ -289,11 +363,22 @@ export default function MacrosManager() {
   };
 
   const handleDelete = async (id: string) => {
+    const previousMacros = [...macros];
+    const targetMacro = macros.find((m) => m.id === id);
     setMacros((prev) => prev.filter((m) => m.id !== id));
+    setErrorNotice(null);
+
     try {
-      await supabase.from('macros').delete().eq('id', id);
-    } catch (err) {
+      const { error } = await supabase.from('macros').delete().eq('id', id);
+      if (error) throw error;
+      setSyncNotice(`✓ Macro "${targetMacro?.name || 'Item'}" deleted.`);
+      setTimeout(() => setSyncNotice(null), 3000);
+    } catch (err: any) {
       console.error('Failed to delete macro in Supabase:', err);
+      // Rollback optimistic update
+      setMacros(previousMacros);
+      setErrorNotice(`Failed to delete macro "${targetMacro?.name || ''}": ${err.message || 'Database error'}. Restored to list.`);
+      setTimeout(() => setErrorNotice(null), 5000);
     }
   };
 
@@ -353,17 +438,44 @@ export default function MacrosManager() {
         </div>
       </div>
 
-      {/* Sync Banner Notification */}
+      {/* Sync & Error Banner Notifications */}
       <AnimatePresence>
         {syncNotice && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center gap-2 shadow-sm"
+            className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center justify-between gap-2 shadow-sm"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span>{syncNotice}</span>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span>{syncNotice}</span>
+            </div>
+            <button
+              onClick={() => setSyncNotice(null)}
+              className="text-emerald-400/70 hover:text-emerald-300 text-xs p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+        {errorNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium flex items-center justify-between gap-2 shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+              <span>⚠️ {errorNotice}</span>
+            </div>
+            <button
+              onClick={() => setErrorNotice(null)}
+              className="text-red-400/70 hover:text-red-300 text-xs p-1 cursor-pointer"
+            >
+              ✕
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

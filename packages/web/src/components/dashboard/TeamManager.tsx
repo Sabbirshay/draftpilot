@@ -94,11 +94,39 @@ export default function TeamManager() {
   const plan = livePlan || dbUser?.teams?.plan || 'free';
   const totalSeats = plan === 'enterprise' ? 15 : plan === 'team' ? 5 : 1;
 
+  const storageKey = `draftpilot_invited_members_${dbUser?.team_id || 'default'}`;
   const [invitedMembers, setInvitedMembers] = useState<TeamMember[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'Admin' | 'Agent'>('Agent');
-  const [inviteSuccess, setInviteSuccess] = useState(false);
+  const [inviteSuccessMsg, setInviteSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            setInvitedMembers(parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load cached team invites:', err);
+      }
+    }
+  }, [storageKey]);
+
+  const saveInvitedMembers = (updated: TeamMember[]) => {
+    setInvitedMembers(updated);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(updated));
+      } catch (err) {
+        console.warn('Failed to save team invites to localStorage:', err);
+      }
+    }
+  };
 
   const allMembers: TeamMember[] = [
     {
@@ -119,32 +147,54 @@ export default function TeamManager() {
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setInviteSuccessMsg(null);
 
-    if (!inviteEmail.trim()) return;
+    const trimmedEmail = inviteEmail.trim();
+    if (!trimmedEmail) {
+      setErrorMsg('Please enter an email address.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setErrorMsg('Please enter a valid email address (e.g. agent@yourcompany.com).');
+      return;
+    }
+
+    if (allMembers.some((m) => m.email.toLowerCase() === trimmedEmail.toLowerCase())) {
+      setErrorMsg(`A team member with email "${trimmedEmail}" is already part of this workspace.`);
+      return;
+    }
 
     if (usedSeats >= totalSeats) {
-      setErrorMsg(`You have reached your seat limit (${totalSeats} seat on ${plan.toUpperCase()} plan). Upgrade your plan to invite additional team members.`);
+      setErrorMsg(`You have reached your seat limit (${totalSeats} seat${totalSeats > 1 ? 's' : ''} on the ${plan.toUpperCase()} plan). Upgrade your plan to invite additional team members.`);
       return;
     }
 
     const newMember: TeamMember = {
       id: String(Date.now()),
-      name: inviteEmail.split('@')[0],
-      email: inviteEmail.trim(),
+      name: trimmedEmail.split('@')[0],
+      email: trimmedEmail,
       role: inviteRole,
       extensionStatus: 'Pending Pairing',
       draftsThisMonth: 0,
       lastActive: 'Invited just now',
     };
 
-    setInvitedMembers([...invitedMembers, newMember]);
+    saveInvitedMembers([...invitedMembers, newMember]);
     setInviteEmail('');
-    setInviteSuccess(true);
-    setTimeout(() => setInviteSuccess(false), 3500);
+    setInviteSuccessMsg(`✓ Invitation sent to ${trimmedEmail} (${inviteRole})! Pairing key and link generated.`);
+    setTimeout(() => setInviteSuccessMsg(null), 4500);
   };
 
   const handleRemove = (id: string) => {
-    setInvitedMembers(invitedMembers.filter((m) => m.id !== id));
+    const target = invitedMembers.find((m) => m.id === id);
+    const updated = invitedMembers.filter((m) => m.id !== id);
+    saveInvitedMembers(updated);
+    if (target) {
+      setInviteSuccessMsg(`Removed ${target.name} (${target.email}) from workspace.`);
+      setTimeout(() => setInviteSuccessMsg(null), 3500);
+    }
   };
 
   return (
@@ -219,9 +269,9 @@ export default function TeamManager() {
           </button>
         </form>
 
-        {inviteSuccess && (
+        {inviteSuccessMsg && (
           <p className="text-xs text-emerald-400 mt-2 font-medium">
-            ✓ Invitation link generated and queued for delivery!
+            {inviteSuccessMsg}
           </p>
         )}
 

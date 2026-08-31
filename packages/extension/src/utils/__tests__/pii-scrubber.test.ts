@@ -1,6 +1,7 @@
+/// <reference types="node" />
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { scrubPII } from '../pii-scrubber.ts';
+import { scrubPII } from '../pii-scrubber';
 
 describe('P2-Finding 5: PII Scrubber Redaction Gaps', () => {
   test('redacts email addresses', () => {

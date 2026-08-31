@@ -1,0 +1,6 @@
+manage-package-manager-versions=false
+package-manager-strict=false
+auto-install-peers=true
+frozen-lockfile=false
+strict-peer-dependencies=false
+node-linker=hoisted

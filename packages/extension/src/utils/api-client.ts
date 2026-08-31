@@ -557,7 +557,7 @@ export class ApiClient {
           },
           body: JSON.stringify({
             threadContent: scrubbed,
-            macroHint: hint,
+            macroHint: macroHint || '',
             matchedMacro,
             kbSnippets,
           }),

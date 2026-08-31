@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DateRangeState } from './DateRangePicker';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -15,51 +15,138 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
   const { dbUser, user } = useAuth();
   const [draftsCount, setDraftsCount] = useState<number>(0);
   const [macrosCount, setMacrosCount] = useState<number>(0);
+  const [monthlyLimit, setMonthlyLimit] = useState<number>(
+    (dbUser as any)?.teams?.monthly_draft_limit || (dbUser as any)?.monthly_draft_limit || 50
+  );
+  const [teamPlan, setTeamPlan] = useState<string>(
+    (dbUser as any)?.teams?.plan || (dbUser as any)?.plan || 'free'
+  );
   const [loadingStats, setLoadingStats] = useState<boolean>(true);
   const [aiQuery, setAiQuery] = useState('');
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [isQuerying, setIsQuerying] = useState(false);
 
-  // Fetch real team metrics from Supabase
-  useEffect(() => {
-    async function fetchRealMetrics() {
-      setLoadingStats(true);
-      const teamId = dbUser?.team_id || user?.id;
-
-      try {
-        if (teamId) {
-          // Count macros
-          const { count: macroCount } = await supabase
-            .from('macros')
-            .select('*', { count: 'exact', head: true })
-            .eq('team_id', teamId);
-
-          if (macroCount !== null) {
-            setMacrosCount(macroCount);
-          }
-
-          // Count draft history
-          const { count: draftCount } = await supabase
-            .from('draft_history')
-            .select('*', { count: 'exact', head: true })
-            .eq('team_id', teamId);
-
-          if (draftCount !== null) {
-            setDraftsCount(draftCount);
-          }
-        }
-      } catch (err) {
-        console.warn('Could not fetch real metrics from Supabase, defaulting to zero state:', err);
-      } finally {
-        setLoadingStats(false);
-      }
+  const fetchRealMetrics = useCallback(async () => {
+    const teamId = dbUser?.team_id || (dbUser as any)?.teams?.id || user?.id;
+    if (!teamId) {
+      setLoadingStats(false);
+      return;
     }
 
-    fetchRealMetrics();
+    try {
+      // 1. Fetch team quota and plan
+      const { data: teamData } = await supabase
+        .from('teams')
+        .select('id, monthly_draft_limit, plan')
+        .eq('id', teamId)
+        .maybeSingle();
+
+      if (teamData) {
+        if (teamData.monthly_draft_limit) setMonthlyLimit(teamData.monthly_draft_limit);
+        if (teamData.plan) setTeamPlan(teamData.plan);
+      }
+
+      // 2. Count macros
+      const { count: macroCount } = await supabase
+        .from('macros')
+        .select('*', { count: 'exact', head: true })
+        .eq('team_id', teamId);
+
+      if (macroCount !== null) {
+        setMacrosCount(macroCount);
+      }
+
+      // 3. Count draft history
+      const { count: draftCount } = await supabase
+        .from('draft_history')
+        .select('*', { count: 'exact', head: true })
+        .eq('team_id', teamId);
+
+      if (draftCount !== null) {
+        setDraftsCount(draftCount);
+      }
+    } catch (err) {
+      console.warn('Could not fetch real metrics from Supabase, defaulting to zero state:', err);
+    } finally {
+      setLoadingStats(false);
+    }
   }, [dbUser, user]);
+
+  // Initial fetch and Supabase Realtime Channels
+  useEffect(() => {
+    fetchRealMetrics();
+
+    const teamId = dbUser?.team_id || (dbUser as any)?.teams?.id || user?.id;
+    if (!teamId) return;
+
+    // Realtime channel for live cross-party synchronization
+    const channel = supabase
+      .channel(`bento-live-sync-${teamId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'draft_history',
+          filter: `team_id=eq.${teamId}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setDraftsCount((prev) => prev + 1);
+          } else if (payload.eventType === 'DELETE') {
+            setDraftsCount((prev) => Math.max(0, prev - 1));
+          } else {
+            fetchRealMetrics();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'macros',
+          filter: `team_id=eq.${teamId}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setMacrosCount((prev) => prev + 1);
+          } else if (payload.eventType === 'DELETE') {
+            setMacrosCount((prev) => Math.max(0, prev - 1));
+          } else {
+            fetchRealMetrics();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'teams',
+          filter: `id=eq.${teamId}`,
+        },
+        (payload: any) => {
+          if (payload.new) {
+            if (payload.new.monthly_draft_limit) {
+              setMonthlyLimit(payload.new.monthly_draft_limit);
+            }
+            if (payload.new.plan) {
+              setTeamPlan(payload.new.plan);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [dbUser, user, fetchRealMetrics]);
 
   const hasRealData = draftsCount > 0;
   const hoursSaved = (draftsCount * 3.5 / 60).toFixed(1);
+  const quotaPercent = Math.min(100, Math.round((draftsCount / (monthlyLimit || 50)) * 100));
 
   const handleAiQuerySubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,7 +291,7 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
           <div className="flex items-center justify-between my-2">
             <div>
               <div className="text-3xl font-extrabold text-text font-mono tracking-tight">
-                1 <span className="text-lg text-text-dim font-normal">/ 1 seat</span>
+                1 <span className="text-lg text-text-dim font-normal">/ {teamPlan === 'enterprise' ? '25' : teamPlan === 'team' ? '5' : '1'} seat</span>
               </div>
               <div className="text-[11px] text-text-muted mt-0.5 font-medium">
                 Owner account active
@@ -248,105 +335,83 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
             </span>
           </div>
 
-          {/* Breakdown progress bars */}
-          <div className="space-y-3.5">
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-text font-medium">Billing &amp; Refunds</span>
-                <span className="font-mono text-text-muted">{hasRealData ? '94%' : 'Synced'}</span>
-              </div>
-              <div className="h-2.5 w-full rounded-full bg-bg/80 overflow-hidden p-0.5 border border-border/40">
-                <div className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-400 w-full shadow-[0_0_10px_rgba(163,230,53,0.6)]" />
-              </div>
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-text-dim">
+              <span>{macrosCount} Macros Connected</span>
+              <span className="font-mono text-text font-medium">{hasRealData ? `${draftsCount} matched` : 'Awaiting inquiries'}</span>
             </div>
-
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-text font-medium">General Inquiries</span>
-                <span className="font-mono text-text-muted">{hasRealData ? '96%' : 'Synced'}</span>
-              </div>
-              <div className="h-2.5 w-full rounded-full bg-bg/80 overflow-hidden p-0.5 border border-border/40">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan to-blue-400 w-full shadow-[0_0_10px_rgba(0,210,255,0.6)]" />
-              </div>
+            {/* Split multi-colored progress bar */}
+            <div className="h-2.5 w-full rounded-full bg-bg/80 overflow-hidden flex p-0.5 border border-border/40 gap-0.5">
+              <div
+                className="h-full rounded-l-full bg-gradient-to-r from-violet-500 to-accent-light shadow-[0_0_8px_rgba(124,58,237,0.8)] transition-all"
+                style={{ width: hasRealData ? '72%' : '50%' }}
+              />
+              <div
+                className="h-full bg-cyan shadow-[0_0_8px_rgba(0,210,255,0.8)] transition-all"
+                style={{ width: hasRealData ? '26.5%' : '50%' }}
+              />
+              <div
+                className="h-full rounded-r-full bg-rose-500/80 transition-all"
+                style={{ width: hasRealData ? '1.5%' : '0%' }}
+              />
             </div>
           </div>
         </div>
 
-        <div className="pt-3 border-t border-border/40 text-[11px] text-text-dim flex items-center justify-between mt-2">
-          <span>Synced with {macrosCount} team macros</span>
+        <div className="pt-4 border-t border-border/40 flex items-center justify-between text-[11px] text-text-dim mt-4">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+            Active Grounding
+          </span>
           <button
             onClick={onNavigateToMacros}
-            className="text-accent font-semibold hover:underline cursor-pointer bg-transparent border-none p-0 text-[11px]"
+            className="text-accent-light hover:underline font-semibold"
           >
-            Manage KB →
+            Manage Knowledge Base →
           </button>
         </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          CARD 5: 3D Support Volume & AI Prompt Bar (Bottom Left, 8 cols)
+          CARD 5: AI Copilot Natural Language Insights (Bottom Left, 8 cols)
       ───────────────────────────────────────────────────────────── */}
-      <div className="md:col-span-8 rounded-3xl bg-elevated/70 border border-border/80 p-6 shadow-lg relative overflow-hidden group hover:border-accent/40 transition-colors flex flex-col justify-between min-h-[380px]">
+      <div className="md:col-span-8 rounded-3xl bg-gradient-to-br from-elevated/90 to-elevated/40 border border-border/80 p-6 shadow-lg relative overflow-hidden group hover:border-accent/40 transition-colors flex flex-col justify-between">
         <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-semibold text-text">Support Volume Activity</h3>
-            <p className="text-[11px] text-text-dim">
-              AI-assisted drafts in window: <strong>{dateRange?.label}</strong>
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(124,58,237,0.3)]">
+              ✨
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-text">DraftPilot AI Synthesizer</h3>
+              <p className="text-[11px] text-text-dim">Ask conversational questions about your team support telemetry</p>
+            </div>
           </div>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-bg border border-border font-mono text-text-dim">
-            {dateRange?.granularity || 'Daily'} Interval
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-bg text-text-dim border border-border font-mono">
+            GPT-4o Mini &amp; Llama 3.1
           </span>
         </div>
 
-        {/* Real Activity Bars or Empty State prompt */}
-        {hasRealData ? (
-          <div className="relative h-44 flex items-end justify-around px-4 my-2">
-            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day, i) => (
-              <div key={i} className="relative z-10 flex flex-col items-center gap-2 group/bar w-16">
-                <motion.div
-                  initial={{ height: 0 }}
-                  animate={{ height: `${(i + 1) * 20}%` }}
-                  transition={{ duration: 0.8, delay: i * 0.08 }}
-                  className="w-12 rounded-t-lg bg-gradient-to-t from-emerald-600/40 via-lime-400 to-lime-300 relative shadow-[0_0_20px_rgba(163,230,53,0.4)] border-t border-x border-lime-200/50"
-                >
-                  <div className="absolute -top-1 inset-x-0 h-2 bg-lime-200/80 rounded-full blur-[0.5px]" />
-                </motion.div>
-                <span className="text-xs font-mono text-text-muted mt-1">{day}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="h-44 flex flex-col items-center justify-center text-center p-6 border border-dashed border-border/60 rounded-2xl bg-bg/40 my-2">
-            <span className="text-3xl mb-2">⚡</span>
-            <h4 className="text-sm font-semibold text-text">No email replies drafted yet</h4>
-            <p className="text-xs text-text-muted max-w-sm mt-1">
-              Open Gmail with your DraftPilot Chrome extension and draft a reply to see live hourly velocity and volume insights here.
-            </p>
-          </div>
-        )}
-
-        {/* Interactive AI Question Bar */}
-        <div className="mt-4 pt-3 border-t border-border/50">
+        {/* Interactive Query Input */}
+        <div className="my-2">
           <form onSubmit={handleAiQuerySubmit} className="relative">
-            <div className="text-[11px] font-semibold text-text-muted mb-1.5 flex items-center gap-1.5">
-              <span>✨</span>
-              <span>Ask DraftPilot Support AI:</span>
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                value={aiQuery}
-                onChange={(e) => setAiQuery(e.target.value)}
-                placeholder="e.g. How many drafts did our team generate this week?"
-                className="w-full px-4 py-2.5 rounded-xl bg-bg/90 border border-border focus:border-accent focus:ring-2 focus:ring-accent/30 text-xs text-text placeholder-text-dim pr-24 outline-none transition-all"
-              />
+            <input
+              type="text"
+              value={aiQuery}
+              onChange={(e) => setAiQuery(e.target.value)}
+              placeholder="e.g. Which macro was used most this week? Or how can we reduce refund requests?"
+              className="w-full pl-4 pr-24 py-3 rounded-2xl bg-bg/80 border border-border/80 text-xs text-text placeholder:text-text-dim/60 focus:outline-none focus:border-accent shadow-inner transition-colors"
+            />
+            <div className="absolute right-1.5 top-1.5 bottom-1.5 flex items-center">
               <button
                 type="submit"
-                disabled={isQuerying}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                disabled={isQuerying || !aiQuery.trim()}
+                className="h-full px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold transition-all disabled:opacity-40 flex items-center gap-1.5 shadow-[0_0_10px_rgba(124,58,237,0.3)]"
               >
-                {isQuerying ? 'Analyzing...' : 'Ask AI'}
+                {isQuerying ? (
+                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span>Ask AI</span>
+                )}
               </button>
             </div>
           </form>
@@ -392,16 +457,22 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
           </p>
         </div>
 
-        {/* Mini progress tracker */}
+        {/* Mini progress tracker with Dynamic Quota */}
         <div className="pt-6 border-t border-border/40 mt-4">
           <div className="flex justify-between text-[11px] text-text-dim mb-1.5">
-            <span>Monthly Free Quota ({draftsCount} / 50 drafts)</span>
-            <span className="font-mono font-bold text-emerald-400">{Math.min(100, Math.round((draftsCount / 50) * 100))}%</span>
+            <span>
+              {teamPlan === 'enterprise'
+                ? `Enterprise Quota (${draftsCount} / ${monthlyLimit} drafts)`
+                : teamPlan === 'team'
+                ? `Team Quota (${draftsCount} / ${monthlyLimit} drafts)`
+                : `Monthly Quota (${draftsCount} / ${monthlyLimit} drafts)`}
+            </span>
+            <span className="font-mono font-bold text-emerald-400">{quotaPercent}%</span>
           </div>
           <div className="h-2 w-full rounded-full bg-bg/80 overflow-hidden p-0.5 border border-border/40">
             <div
               className="h-full rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] transition-all"
-              style={{ width: `${Math.max(4, Math.min(100, Math.round((draftsCount / 50) * 100)))}%` }}
+              style={{ width: `${Math.max(4, quotaPercent)}%` }}
             />
           </div>
         </div>

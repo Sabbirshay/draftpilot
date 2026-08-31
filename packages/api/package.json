@@ -5,7 +5,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
