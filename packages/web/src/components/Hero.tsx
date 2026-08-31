@@ -64,7 +64,7 @@ export default function Hero() {
         
         {/* CTA Buttons */}
         <div className="flex flex-col sm:flex-row items-center gap-3.5 mb-6">
-          <Button variant="primary" className="text-sm px-8 py-3.5 rounded-full font-semibold shadow-[0_0_30px_rgba(124,58,237,0.4)] flex items-center gap-2">
+          <Button variant="primary" href="/join" className="text-sm px-8 py-3.5 rounded-full font-semibold shadow-[0_0_30px_rgba(124,58,237,0.4)] flex items-center gap-2">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
             </svg>

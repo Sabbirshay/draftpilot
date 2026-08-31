@@ -41,7 +41,7 @@ export default function Pricing() {
               </ul>
             </div>
             
-            <Button variant="secondary" className="w-full rounded-full py-3 text-xs font-bold">
+            <Button variant="secondary" href="/join" className="w-full rounded-full py-3 text-xs font-bold">
               Get Started Free
             </Button>
           </div>
@@ -78,7 +78,7 @@ export default function Pricing() {
               </ul>
             </div>
             
-            <Button variant="primary" className="w-full rounded-full py-3 text-xs font-bold shadow-[0_0_20px_rgba(124,58,237,0.5)]">
+            <Button variant="primary" href="/join" className="w-full rounded-full py-3 text-xs font-bold shadow-[0_0_20px_rgba(124,58,237,0.5)]">
               Start 14-Day Free Trial
             </Button>
           </div>

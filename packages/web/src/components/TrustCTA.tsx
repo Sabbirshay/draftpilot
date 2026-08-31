@@ -22,7 +22,7 @@ export default function TrustCTA() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
-            <Button variant="primary" className="text-sm px-8 py-4 rounded-full font-bold shadow-[0_0_30px_rgba(124,58,237,0.5)]">
+            <Button variant="primary" href="/join" className="text-sm px-8 py-4 rounded-full font-bold shadow-[0_0_30px_rgba(124,58,237,0.5)]">
               Add DraftPilot to Chrome — Free
             </Button>
             <Button variant="secondary" href="#pricing" className="text-sm px-6 py-4 rounded-full">
