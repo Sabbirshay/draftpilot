@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ConditionalLayout from "@/components/ConditionalLayout";
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: "DraftPilot | AI-drafted replies, inside the inbox you already use",
@@ -32,6 +33,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="font-sans antialiased min-h-screen flex flex-col bg-bg text-text">
         <ConditionalLayout>{children}</ConditionalLayout>
+        <Analytics />
       </body>
     </html>
   );
