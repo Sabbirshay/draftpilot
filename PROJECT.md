@@ -1,66 +1,46 @@
-# Project: OpenRouter Upstream Response Validation, Key Telemetry & Verbatim Advisory UI
+# Project: DraftPilot Full-Stack Security Audit & Defensive Hardening
 
 ## Architecture
-- **Web Frontend (`packages/web`)**: Next.js 14 App Router, React 18, Tailwind CSS, Lucide icons.
-  - `packages/web/src/components/admin/AdminAIConfig.tsx`: Central component for AI Provider configuration, model selection, live API key verification (`/api/v1/auth/key`), telemetry display, and interactive playground test draft generation (`/api/v1/chat/completions`).
-- **Backend API (`packages/api`)**: NestJS 10, AI Provider Service (`AiProviderService`), Drafts Service.
-- **Chrome Extension (`packages/extension`)**: Manifest V3, Vite 5, Sidebar Draft Assistant.
-- **Test Infrastructure (`packages/web/src/lib/__tests__/`)**: Node.js native test runner (`node:test`, `node:assert`), comprehensive unit and integration test harnesses.
+- **Web Application (`packages/web`)**: Next.js 14 App Router, React 18, Supabase client/server auth wrappers, Admin panel components, and API routes (`/api/admin/*`, `/api/drafts/*`).
+- **Backend API (`packages/api`)**: NestJS 10 REST API, Supabase Database migrations, Billing Module (Stripe Webhook), Drafts Module, Auth Guards, Rate Limiters, Helmet, CORS.
+- **Chrome Extension (`packages/extension`)**: Manifest V3 extension, Vite 5, Background Service Worker, Content Scripts (Gmail Detector), Sidepanel UI, and client-side PII scrubber.
 
 ## Feature Inventory
-| # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | Upstream Error Classification & Parsing | Differentiate between 429 Daily Cap (50 req/day on $0 balance), 429 Concurrency (20 req/min), 503/529 Model Congestion, 402 Credits Exhausted, 401 Invalid Key, and general failures | M2 | ORIGINAL_REQUEST §1 |
-| 2 | Verbatim Upstream Error Extraction | Extract verbatim `data?.error?.message` or raw error payload from live `/api/v1/chat/completions` responses | M2 | ORIGINAL_REQUEST §1, §3 |
-| 3 | `/api/v1/auth/key` Live Telemetry Ingestion | Upgrade `handleVerifyKey` in `AdminAIConfig.tsx` to query OpenRouter auth/key endpoint and parse `label`, `usage`, `limit`, `limit_remaining`, `is_free_tier`, `rate_limit` | M1 | ORIGINAL_REQUEST §2 |
-| 4 | Real-Time Key Quota & Balance Telemetry Grid | Render a 4-card telemetry grid below the API key input displaying key label, usage in USD, remaining credit limit, rate limit interval, and free-tier status badge | M1 | ORIGINAL_REQUEST §2 |
-| 5 | Verbatim Error & Actionable Advisory UI | Replace hardcoded 50 req/day banner with a dynamic advisory banner showing verbatim upstream error, categorized badge, actionable resolution steps, and direct credit top-up link | M2 | ORIGINAL_REQUEST §3 |
-| 6 | Immediate Grounded Fallback Draft Preview | Present the high-fidelity offline synthesizer fallback draft in the playground with clear status badge when upstream OpenRouter calls fail | M2 | ORIGINAL_REQUEST §3 |
-| 7 | Comprehensive Telemetry & Error Test Suite | Automated test suite (`openrouter-telemetry.test.ts`) covering all telemetry parsing, 5-category error classification, verbatim extraction, and fallback logic | M3 | ORIGINAL_REQUEST §4 |
-| 8 | Full Monorepo Build & Test Suite Verification | Verify all unit/integration tests (`pnpm test`) and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) pass with zero regressions | M3 | ORIGINAL_REQUEST §4 |
+| # | Feature / Remediation | Description | Milestone | Source | Status |
+|---|------------------------|-------------|-----------|--------|--------|
+| 1 | Passkey Hardening & Constant-Time Auth | Remove plaintext passkeys and enforce server-side constant-time comparison in `admin-auth.ts`, `AdminGuard.tsx`, `login/page.tsx` | M1 | R1 | DONE |
+| 2 | Stripe Webhook Cryptographic Verification | Verify Stripe webhook signatures via `stripe.webhooks.constructEvent` with `rawBody` in `billing.controller.ts` | M1 | R1, R2 | DONE |
+| 3 | HTTP Security Headers & Helmet Hardening | Configure Helmet in NestJS `main.ts`, pin extension CORS origin, and strengthen Next.js CSP in `next.config.js` | M1 | R1 | DONE |
+| 4 | Monthly Draft Quota & Usage Rate Limiting | Enforce monthly draft quota checks and usage table increments in Next.js `/api/drafts/generate/route.ts` with memory leak eviction | M1 | R1 | DONE |
+| 5 | Cross-Tenant RLS Privilege Escalation Fix | Update `users` table RLS UPDATE policy to prevent modifying `team_id`/`role`; restrict `teams` INSERT policy to free tier | M2 | R2 | DONE |
+| 6 | Full-Stack Server-Side PII Scrubbing | Add server-side PII scrubbing in `drafts.service.ts` and `/api/drafts/generate/route.ts` before database storage and prompt dispatch | M2 | R2 | DONE |
+| 7 | Client-Side Secret Cleanliness & Sanitization | Remove plaintext API key storage in localStorage in `AdminAIConfig.tsx`; pass standard Bearer token authorization headers | M2 | R2 | DONE |
+| 8 | Extension DOM Insertion & Stored XSS Defense | Implement HTML entity escaping in `sidepanel.ts` for macro rendering and in `gmail-detector.ts` for Gmail compose injection | M3 | R3 | DONE |
+| 9 | Extension Service Worker Message Sender Verification | Restrict `GET_AUTH_TOKEN` and `SET_AUTH_TOKEN` in `service-worker.ts` to internal extension contexts (`!sender.tab`), blocking untrusted content scripts | M3 | R3 | DONE |
+| 10 | Unified Client PII Scrubber & Manifest CSP Hardening | Synchronize PII scrubbing rules (including street addresses, PO boxes, JWTs, and API tokens) in extension and harden manifest CSP to `object-src 'none'` | M3 | R3 | DONE |
+| 11 | Full Test Suite & Production Build Verification | Execute `pnpm test`, `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` with zero errors | M4 | R4 | DONE |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Real-Time Key Quota & Balance Telemetry | Upgrade `handleVerifyKey` in `AdminAIConfig.tsx` to query `/api/v1/auth/key`, capture complete telemetry state, and render the 4-card telemetry UI grid | none | IN_PROGRESS |
-| 2 | Verbatim Upstream Error Diagnostics & Playground Advisory UI | Refactor playground draft testing in `AdminAIConfig.tsx` to extract verbatim upstream errors, classify error categories, display actionable guidance banner, and render grounded fallback draft | M1 | PLANNED |
-| 3 | E2E Test Suite & Monorepo Build Verification | Implement `openrouter-telemetry.test.ts` test suite, verify full monorepo tests (`pnpm test`), and run all production builds (`build:web`, `build:api`, `build:ext`) | M1, M2 | PLANNED |
-
-## Interface Contracts
-### OpenRouter Auth/Key Telemetry Schema
-```typescript
-export interface OpenRouterKeyTelemetry {
-  label: string | null;
-  usage: number; // in USD
-  limit: number | null; // in USD, null if unlimited
-  limit_remaining?: number | null; // in USD
-  is_free_tier: boolean;
-  rate_limit: {
-    requests: number;
-    interval: string; // e.g. "10s", "1m"
-  };
-}
-```
-
-### OpenRouter Error Classification Interface
-```typescript
-export type OpenRouterErrorCategory =
-  | 'daily_cap'        // 429 with free tier daily cap (50 reqs/day on $0 balance)
-  | 'rate_limit'       // 429 short term burst concurrency (20 reqs/min)
-  | 'congestion'       // 503 / 529 / model queue congestion
-  | 'credits_exhausted'// 402 insufficient credits / non-free model without balance
-  | 'auth_error'       // 401 invalid API key
-  | 'general';         // other network/API errors
-
-export interface OpenRouterErrorDiagnostics {
-  category: OpenRouterErrorCategory;
-  verbatimMessage: string;
-  statusCode: number;
-  actionableGuidance: string;
-}
-```
+| 1 | Auth, Admin Endpoints, Headers & Rate Limiting | `admin-auth.ts`, `AdminGuard.tsx`, `login/page.tsx`, `billing.controller.ts`, `next.config.js`, NestJS `main.ts`, `/api/drafts/generate/route.ts` | none | DONE |
+| 2 | Supabase RLS Policies, Secret Isolation & Server PII | `003_strict_rls_security.sql`, `006_harden_user_tenant_rls.sql`, `drafts.service.ts`, `AdminAIConfig.tsx`, server-side `pii-scrubber` | M1 | DONE |
+| 3 | Extension Client Sandbox, Message Passing & XSS Defense | `sidepanel.ts`, `gmail-detector.ts`, `service-worker.ts`, `pii-scrubber.ts`, `manifest.json` | M1 | DONE |
+| 4 | Full-Stack Integration Verification & Forensic Audit | Monorepo tests (`pnpm test`), builds (`build:web`, `build:api`, `build:ext`), Reviewer, Challenger & Forensic Auditor gates | M1, M2, M3 | DONE |
 
 ## Code Layout
-- `packages/web/src/components/admin/AdminAIConfig.tsx`: UI component for admin settings, telemetry grid, test draft playground, and advisory banners. Owned exclusively by Worker during M1/M2.
-- `packages/web/src/lib/__tests__/openrouter-telemetry.test.ts`: Dedicated test suite for OpenRouter telemetry parsing, error classification, and fallback verification. Owned by Worker / Test Writer during M3.
-- `packages/web/src/lib/__tests__/ai-pipeline.test.ts`: AI pipeline regression test suite.
+- `packages/web/src/lib/admin-auth.ts`: Server-side superadmin authentication guard.
+- `packages/web/src/components/admin/AdminGuard.tsx`: Client-side admin route protection.
+- `packages/web/src/app/admin/login/page.tsx`: Admin login page.
+- `packages/web/src/app/api/drafts/generate/route.ts`: Next.js draft generation, rate limits & usage tracking.
+- `packages/web/next.config.js`: Next.js HTTP security headers and CSP.
+- `packages/api/src/main.ts`: NestJS entrypoint with Helmet and CORS origin validation.
+- `packages/api/src/billing/billing.controller.ts`: NestJS Stripe webhook handler.
+- `packages/api/supabase/migrations/`: Supabase RLS migrations.
+- `packages/api/src/drafts/drafts.service.ts`: NestJS draft service & PII scrubber.
+- `packages/web/src/components/admin/AdminAIConfig.tsx`: Admin AI config UI.
+- `packages/extension/src/sidepanel/sidepanel.ts`: Extension sidepanel UI, macro renderer & XSS escaping.
+- `packages/extension/src/content/gmail-detector.ts`: Gmail content script & safe draft insertion.
+- `packages/extension/src/background/service-worker.ts`: Background service worker with sender origin checks.
+- `packages/extension/src/utils/pii-scrubber.ts`: Extension client PII scrubber.
+- `packages/extension/manifest.json`: Manifest V3 configuration & CSP.

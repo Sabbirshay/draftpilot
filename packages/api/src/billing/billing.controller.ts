@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Body, UseGuards, Req, Headers, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+  Headers,
+  BadRequestException,
+  RawBodyRequest,
+} from '@nestjs/common';
+import { Request } from 'express';
 import { BillingService } from './billing.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/auth.decorator';
@@ -39,7 +50,31 @@ export class BillingController {
   }
 
   @Post('webhook')
-  async handleWebhook(@Body() body: any) {
-    return await this.billingService.handleWebhook(body);
+  async handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('stripe-signature') signature: string,
+    @Body() body: any
+  ) {
+    const endpointSecret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
+    let event: any;
+
+    if (endpointSecret) {
+      if (!signature) {
+        throw new BadRequestException('Missing stripe-signature header');
+      }
+      const rawPayload = req.rawBody || (typeof req.body === 'string' ? Buffer.from(req.body) : Buffer.from(JSON.stringify(body || {})));
+      try {
+        event = this.billingService.constructWebhookEvent(rawPayload, signature, endpointSecret);
+      } catch (err: any) {
+        throw new BadRequestException(`Webhook signature verification failed: ${err.message}`);
+      }
+    } else {
+      if (process.env.NODE_ENV === 'production') {
+        throw new BadRequestException('STRIPE_WEBHOOK_SECRET is not configured in production');
+      }
+      event = body;
+    }
+
+    return await this.billingService.handleWebhook(event);
   }
 }

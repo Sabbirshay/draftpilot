@@ -60,9 +60,11 @@ export default function AdminBillingAnalytics() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
-      const headers: Record<string, string> = {
-        'x-admin-passkey': 'draftpilot-root-2026',
-      };
+      const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
+      const headers: Record<string, string> = {};
+      if (adminPasskey) {
+        headers['x-admin-passkey'] = adminPasskey;
+      }
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -191,10 +193,13 @@ export default function AdminBillingAnalytics() {
       const token = sessionData.session?.access_token || localStorage.getItem('draftpilot_token');
 
       let saved = false;
+      const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
       const patchHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-admin-passkey': 'draftpilot-root-2026',
       };
+      if (adminPasskey) {
+        patchHeaders['x-admin-passkey'] = adminPasskey;
+      }
       if (token) {
         patchHeaders['Authorization'] = `Bearer ${token}`;
       }

@@ -3,6 +3,7 @@ import { AiProviderService } from './ai-provider.service';
 import { SupabaseService } from '../config/supabase.service';
 import { BillingService } from '../billing/billing.service';
 import { GenerateDraftDto } from './dto/generate-draft.dto';
+import { scrubPII } from '../utils/pii-scrubber';
 
 function extractSenderName(text: string): string {
   if (!text) return 'there';
@@ -53,6 +54,9 @@ export class DraftsService {
       throw new HttpException('Usage limit exceeded. Please upgrade your plan.', HttpStatus.TOO_MANY_REQUESTS);
     }
 
+    // Scrub customer PII before sending to AI or logging
+    const scrubbedContent = scrubPII(dto.threadContent || '');
+
     // 2. Search macros or preserve custom guidance
     let macroContent = '';
     let macroId = null;
@@ -85,7 +89,7 @@ export class DraftsService {
         .limit(30);
 
       if (chunks && chunks.length > 0) {
-        const lowerThread = dto.threadContent.toLowerCase();
+        const lowerThread = scrubbedContent.toLowerCase();
         const keywords = lowerThread
           .replace(/[^a-z0-9\s]/g, ' ')
           .split(/\s+/)
@@ -110,7 +114,7 @@ export class DraftsService {
       // Fallback
     }
 
-    const customerName = extractSenderName(dto.threadContent || '');
+    const customerName = extractSenderName(scrubbedContent);
 
     // 4. Build prompt (clean separation without duplicating system prompt in user message)
     const promptSections: string[] = [];
@@ -123,13 +127,14 @@ export class DraftsService {
     if (kbSnippets.length > 0) {
       promptSections.push(`### Knowledge Base Documentation:\n${kbSnippets.join('\n---\n')}`);
     }
-    promptSections.push(`Customer message:\n${dto.threadContent}`);
+    promptSections.push(`Customer message:\n${scrubbedContent}`);
     promptSections.push(`Draft a clean, friendly reply:`);
 
     const prompt = promptSections.join('\n\n');
 
     // 5. Call AI provider
-    const draft = await this.ai.generateText(prompt, customerName);
+    const rawDraft = await this.ai.generateText(prompt, customerName);
+    const draft = scrubPII(rawDraft);
 
     // 6. Increment usage
     await this.billing.incrementUsage(teamId);
@@ -140,7 +145,7 @@ export class DraftsService {
       .insert({
         team_id: teamId,
         user_id: user.id,
-        thread_snippet: dto.threadContent.substring(0, 100),
+        thread_snippet: scrubbedContent.substring(0, 100),
         generated_draft: draft,
         macro_used_id: macroId,
       });

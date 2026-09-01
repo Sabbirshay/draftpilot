@@ -97,22 +97,19 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
     // Step A: Immediate LocalStorage hydration (avoids clearing on page refresh)
     if (typeof window !== 'undefined') {
       const cachedProvider = localStorage.getItem('draftpilot_ai_provider');
-      const cachedOrKey = localStorage.getItem('draftpilot_openrouter_key');
       const cachedOrModel = localStorage.getItem('draftpilot_openrouter_model');
       const cachedCustomModel = localStorage.getItem('draftpilot_custom_model');
-      const cachedOaiKey = localStorage.getItem('draftpilot_openai_key');
       const cachedPrompt = localStorage.getItem('draftpilot_system_prompt');
       const cachedTemp = localStorage.getItem('draftpilot_temperature');
       const cachedTokens = localStorage.getItem('draftpilot_max_tokens');
 
+      // Security: remove plaintext API keys from localStorage to prevent client-side secret exposure
+      localStorage.removeItem('draftpilot_openrouter_key');
+      localStorage.removeItem('draftpilot_openai_key');
+
       if (cachedProvider) setProvider(cachedProvider as any);
-      if (cachedOrKey) {
-        setOpenrouterKey(cachedOrKey);
-        setKeyStatus('valid');
-      }
       if (cachedOrModel) setOpenrouterModel(cachedOrModel);
       if (cachedCustomModel) setCustomOpenrouterModel(cachedCustomModel);
-      if (cachedOaiKey) setOpenaiKey(cachedOaiKey);
       if (cachedPrompt) setSystemPrompt(cachedPrompt);
       if (cachedTemp) setTemperature(Number(cachedTemp));
       if (cachedTokens) setMaxTokens(Number(cachedTokens));
@@ -124,10 +121,12 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
+        const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
         let data = null;
-        const headers: Record<string, string> = {
-          'x-admin-passkey': 'draftpilot-root-2026',
-        };
+        const headers: Record<string, string> = {};
+        if (adminPasskey) {
+          headers['x-admin-passkey'] = adminPasskey;
+        }
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
@@ -155,7 +154,6 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           }
           if (data.openrouter_api_key) {
             setOpenrouterKey(data.openrouter_api_key);
-            localStorage.setItem('draftpilot_openrouter_key', data.openrouter_api_key);
             setKeyStatus('valid');
           }
           if (data.openrouter_model) {
@@ -168,7 +166,6 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           }
           if (data.openai_api_key) {
             setOpenaiKey(data.openai_api_key);
-            localStorage.setItem('draftpilot_openai_key', data.openai_api_key);
           }
           if (data.system_prompt) {
             setSystemPrompt(data.system_prompt);
@@ -191,12 +188,9 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
     syncFromCloud();
   }, []);
 
-  // Handle OpenRouter API Key input change with instant auto-save to localStorage
+  // Handle OpenRouter API Key input change
   const handleOpenRouterKeyChange = (val: string) => {
     setOpenrouterKey(val);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('draftpilot_openrouter_key', val);
-    }
     setKeyStatus('untested');
   };
 
@@ -228,9 +222,6 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           });
           const label = json.data.label ? ` (${json.data.label})` : '';
           setKeyVerifyMessage(`Verified & Active${label}`);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('draftpilot_openrouter_key', trimmed);
-          }
         } else {
           setKeyStatus('invalid');
           setKeyTelemetry(null);
@@ -257,9 +248,6 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         if (res.ok) {
           setKeyStatus('valid');
           setKeyVerifyMessage('Verified & Active');
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('draftpilot_openai_key', trimmed);
-          }
         } else {
           setKeyStatus('invalid');
           setKeyVerifyMessage(json?.error?.message || 'Invalid OpenAI Key');
@@ -274,16 +262,17 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
   const handleSaveConfig = async () => {
     const activeModel = customOpenrouterModel.trim() || openrouterModel;
 
-    // 1. Save synchronously to localStorage (guarantees zero data loss on refresh)
+    // 1. Save non-sensitive parameters to localStorage (guarantees zero UI preference loss on refresh)
     if (typeof window !== 'undefined') {
       localStorage.setItem('draftpilot_ai_provider', provider);
-      localStorage.setItem('draftpilot_openrouter_key', openrouterKey.trim());
       localStorage.setItem('draftpilot_openrouter_model', activeModel);
       localStorage.setItem('draftpilot_custom_model', customOpenrouterModel.trim());
-      localStorage.setItem('draftpilot_openai_key', openaiKey.trim());
       localStorage.setItem('draftpilot_system_prompt', systemPrompt);
       localStorage.setItem('draftpilot_temperature', String(temperature));
       localStorage.setItem('draftpilot_max_tokens', String(maxTokens));
+      // Ensure no sensitive keys remain in localStorage
+      localStorage.removeItem('draftpilot_openrouter_key');
+      localStorage.removeItem('draftpilot_openai_key');
     }
 
     // 2. Deploy to Supabase platform_settings via secure admin endpoint
@@ -311,10 +300,13 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
       const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
       let saved = false;
+      const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-admin-passkey': 'draftpilot-root-2026',
       };
+      if (adminPasskey) {
+        headers['x-admin-passkey'] = adminPasskey;
+      }
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -587,7 +579,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           </div>
           <p className="text-xs text-text-dim mb-4">
             {provider === 'openrouter'
-              ? 'Enter your OpenRouter key (sk-or-v1-...). Your key is securely preserved in local storage and cloud settings.'
+              ? 'Enter your OpenRouter key (sk-or-v1-...). Your key is securely stored in database settings.'
               : 'Enter your standard OpenAI API key starting with sk-...'}
           </p>
           <div className="flex gap-3 items-center">
@@ -600,7 +592,6 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
                   if (provider === 'openrouter') handleOpenRouterKeyChange(e.target.value);
                   else {
                     setOpenaiKey(e.target.value);
-                    if (typeof window !== 'undefined') localStorage.setItem('draftpilot_openai_key', e.target.value);
                   }
                 }}
                 className="w-full px-4 py-2.5 rounded-xl bg-bg border border-border focus:border-accent text-xs font-mono text-text outline-none pr-14"

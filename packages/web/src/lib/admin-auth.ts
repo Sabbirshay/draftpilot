@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://amjliubpbysvtiqpbgnh.supabase.co';
@@ -23,23 +24,31 @@ export interface AdminAuthResult {
 }
 
 /**
+ * Constant-time comparison between two strings to prevent timing attacks.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf-8');
+  const bufB = Buffer.from(b, 'utf-8');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
  * Shared admin auth verification for admin API routes.
- * 1. Extracts Authorization: Bearer <token>
- * 2. Verifies token with Supabase auth
- * 3. Confirms user is a superadmin via DB role or SUPERADMIN_EMAILS env var
- * 4. Returns 401 for missing/invalid token, 403 for authenticated non-admin
+ * 1. Checks server-side admin passkey header (ADMIN_PASSKEY or SUPERADMIN_PASSKEY) using constant-time comparison
+ * 2. Extracts Authorization: Bearer <token>
+ * 3. Verifies token with Supabase auth
+ * 4. Confirms user is a superadmin via DB role or SUPERADMIN_EMAILS env var
+ * 5. Returns 401 for missing/invalid token, 403 for authenticated non-admin
  */
 export async function verifySuperAdmin(req: Request): Promise<AdminAuthResult> {
-  // 1. Check direct admin passkey header
+  // 1. Check direct server-only admin passkey header (constant-time verification)
   const passkey = req.headers.get('x-admin-passkey')?.trim();
-  const configuredPasskey = process.env.NEXT_PUBLIC_ADMIN_PASSKEY?.trim();
-  if (
-    passkey &&
-    (passkey === 'draftpilot-root-2026' ||
-      passkey === 'admin2026' ||
-      passkey === 'root' ||
-      (configuredPasskey && passkey === configuredPasskey))
-  ) {
+  const configuredPasskey = (process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY)?.trim();
+  if (passkey && configuredPasskey && timingSafeEqual(passkey, configuredPasskey)) {
     return { authorized: true };
   }
 

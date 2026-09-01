@@ -1,5 +1,15 @@
 import { apiClient } from '../utils/api-client';
 
+function escapeHtml(text: string): string {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 class SidePanel {
   private currentThreadText: string = '';
   private currentDraft: string = '';
@@ -308,11 +318,11 @@ class SidePanel {
           (m) => `
           <div class="card macro-item mt-2" style="padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-              <strong style="font-size: 12px; color: #f3f4f6;">${m.name}</strong>
-              <button class="btn btn-ghost btn-sm text-error delete-macro" data-id="${m.id}" style="color: #f87171; font-size: 11px; padding: 2px 6px; cursor: pointer;">✕</button>
+              <strong style="font-size: 12px; color: #f3f4f6;">${escapeHtml(m.name)}</strong>
+              <button class="btn btn-ghost btn-sm text-error delete-macro" data-id="${escapeHtml(m.id)}" style="color: #f87171; font-size: 11px; padding: 2px 6px; cursor: pointer;">✕</button>
             </div>
-            <div style="font-size: 11px; color: #9ca3af; line-height: 1.4; margin-bottom: 8px; max-height: 50px; overflow: hidden; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">${m.content}</div>
-            <button class="btn-use-macro" data-id="${m.id}" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 700; border-radius: 8px; background: #7c3aed; color: white; border: none; cursor: pointer; transition: all 0.2s;">
+            <div style="font-size: 11px; color: #9ca3af; line-height: 1.4; margin-bottom: 8px; max-height: 50px; overflow: hidden; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">${escapeHtml(m.content)}</div>
+            <button class="btn-use-macro" data-id="${escapeHtml(m.id)}" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 700; border-radius: 8px; background: #7c3aed; color: white; border: none; cursor: pointer; transition: all 0.2s;">
               ⚡ Insert Macro into Gmail Reply
             </button>
           </div>
@@ -521,7 +531,14 @@ class SidePanel {
 
               if (target) {
                 target.focus();
-                const html = rawText.replace(/\n/g, '<br>');
+                const escapeHtmlText = (text: string) =>
+                  (text || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+                const html = escapeHtmlText(rawText).replace(/\n/g, '<br>');
                 try {
                   if (!document.execCommand('insertHTML', false, html)) {
                     target.innerHTML = html;

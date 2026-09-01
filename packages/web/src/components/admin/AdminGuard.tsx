@@ -13,9 +13,6 @@ const DEFAULT_ADMIN_EMAILS = [
   'admin@draftpilot.com',
 ];
 
-// Fallback Master Security Passkey (can also be set via NEXT_PUBLIC_ADMIN_PASSKEY)
-const ADMIN_MASTER_PASSKEY = process.env.NEXT_PUBLIC_ADMIN_PASSKEY || 'draftpilot-root-2026';
-
 export default function AdminGuard({ children }: { children: React.ReactNode }) {
   const { user, dbUser, isLoading, signOut } = useAuth();
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
@@ -53,17 +50,25 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
       const emailClean = loginEmail.trim().toLowerCase();
       const passkeyClean = passkeyInput.trim();
 
-      // 1. Direct Master Passkey authentication (Instant root access)
-      if (
-        passkeyClean &&
-        (passkeyClean === ADMIN_MASTER_PASSKEY ||
-          passkeyClean === 'draftpilot-root-2026' ||
-          passkeyClean === 'admin2026' ||
-          passkeyClean === 'root')
-      ) {
-        sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
-        setIsAdminUnlocked(true);
-        return;
+      // 1. Direct Master Passkey authentication via server verification
+      if (passkeyClean) {
+        try {
+          const verifyRes = await fetch('/api/admin/metrics', {
+            headers: { 'x-admin-passkey': passkeyClean },
+          });
+          if (verifyRes.ok) {
+            sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
+            sessionStorage.setItem('draftpilot_admin_passkey', passkeyClean);
+            setIsAdminUnlocked(true);
+            return;
+          }
+        } catch {
+          // Fall through to credential checks or report error
+        }
+
+        if (!emailClean && !loginPassword) {
+          throw new Error('Invalid Superadmin Master Passkey.');
+        }
       }
 
       if (emailClean && !allAdminEmails.includes(emailClean)) {
@@ -115,20 +120,28 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
   };
 
   // Handle Passkey Unlock for already logged-in admin user
-  const handleUnlockWithPasskey = (e: React.FormEvent) => {
+  const handleUnlockWithPasskey = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    const passkeyClean = passkeyInput.trim();
+    if (!passkeyClean) {
+      setAuthError('Please enter the Master Security Passkey.');
+      return;
+    }
 
-    if (
-      passkeyInput.trim() === ADMIN_MASTER_PASSKEY ||
-      passkeyInput.trim() === 'draftpilot-root-2026' ||
-      passkeyInput.trim() === 'admin2026' ||
-      passkeyInput.trim() === 'root'
-    ) {
-      sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
-      setIsAdminUnlocked(true);
-    } else {
-      setAuthError('Incorrect Master Security Passkey.');
+    try {
+      const res = await fetch('/api/admin/metrics', {
+        headers: { 'x-admin-passkey': passkeyClean },
+      });
+      if (res.ok) {
+        sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
+        sessionStorage.setItem('draftpilot_admin_passkey', passkeyClean);
+        setIsAdminUnlocked(true);
+      } else {
+        setAuthError('Incorrect Master Security Passkey.');
+      }
+    } catch {
+      setAuthError('Failed to verify passkey with server.');
     }
   };
 

@@ -33,3 +33,46 @@ Run full monorepo test suites (`pnpm test`) and production builds (`pnpm build:w
 
 ### Build Verification
 - [ ] `pnpm test`, `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` all succeed with zero errors.
+
+## 2026-09-01T20:57:25Z
+
+Perform a comprehensive full-stack security audit and defensive hardening check across the DraftPilot codebase (Next.js web application, NestJS backend API, Manifest V3 Chrome extension), Supabase database access layers, and API endpoints. Identify and remediate critical security vulnerabilities without disrupting existing workflows.
+
+Working directory: /home/md-roni-ahamed/Test project
+Integrity mode: development
+
+## Requirements
+
+### R1. Authentication, Authorization & Admin Endpoint Hardening
+Audit all public and administrative API routes (`/api/admin/*`, `/api/drafts/*`, NestJS controllers), verifying that:
+1. Super admin routes strictly enforce passkey and session token validation (`verifySuperAdmin`, `AdminGuard`).
+2. Public and user endpoints enforce rate limiting to prevent denial-of-service, scraping, and brute-force attacks.
+3. CORS policies, Content Security Policy (CSP), and HTTP security headers prevent unauthorized origins and script injection.
+
+### R2. Database Security, Row-Level Security (RLS) & Secret Isolation
+Audit Supabase database queries and schemas to guarantee:
+1. Client-side code never leaks or utilizes the `SUPABASE_SERVICE_ROLE_KEY`.
+2. All tables (`workspaces`, `macros`, `platform_settings`, `feature_flags`, `billing`) enforce strict Row-Level Security (RLS) policies so authenticated/unauthenticated clients cannot access or modify unauthorized records.
+3. Sensitive customer support threads and drafts redact PII before database storage or telemetry logging.
+
+### R3. Extension & Client-Side Sandbox Security
+Audit the Manifest V3 Chrome Extension (`packages/extension`) for:
+1. Least-privilege manifest permissions and secure message passing between content scripts, sidepanels, and service workers.
+2. Robust client-side PII scrubbing (emails, phone numbers, SSNs, credit cards) prior to prompt dispatch.
+3. Safe DOM insertion preventing XSS when rendering AI replies or macros.
+
+### R4. Non-Destructive Remediation & End-to-End Verification
+Apply targeted, defensive fixes for any discovered vulnerabilities without breaking existing features or user experiences. Verify all changes with automated test suites (`pnpm test`) and complete production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`).
+
+## Acceptance Criteria
+
+### Security Hardening
+- [ ] No secret or service-role keys are exposed in client-facing bundles or public repository files.
+- [ ] All admin routes and destructive actions strictly enforce authorization and passkey verification.
+- [ ] RLS policies and database access patterns prevent cross-tenant data access or unauthorized mutations.
+- [ ] PII scrubbing and DOM sanitization prevent data leaks and XSS vulnerabilities.
+
+### System Integrity & Build Verification
+- [ ] All existing features (AI draft generation, macro management, admin settings, extension sidepanel) continue functioning seamlessly without regressions.
+- [ ] `pnpm test`, `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` all succeed with zero errors.
+

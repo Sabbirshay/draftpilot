@@ -506,17 +506,23 @@ Best regards,
 });
 
 describe('Requirement R4: Super Admin AI Configuration Persistence & Security', () => {
-  test('authenticates admin configuration requests via x-admin-passkey header', async () => {
-    const validReq = new Request('http://localhost:3000/api/admin/ai-config', {
-      method: 'GET',
-      headers: {
-        'x-admin-passkey': 'draftpilot-root-2026',
-      },
-    });
+  test('authenticates admin configuration requests via configured ADMIN_PASSKEY header', async () => {
+    const originalPasskey = process.env.ADMIN_PASSKEY;
+    try {
+      process.env.ADMIN_PASSKEY = 'test-admin-secret-2026';
+      const validReq = new Request('http://localhost:3000/api/admin/ai-config', {
+        method: 'GET',
+        headers: {
+          'x-admin-passkey': 'test-admin-secret-2026',
+        },
+      });
 
-    const auth = await verifySuperAdmin(validReq);
-    assert.strictEqual(auth.authorized, true);
-    assert.strictEqual(auth.response, undefined);
+      const auth = await verifySuperAdmin(validReq);
+      assert.strictEqual(auth.authorized, true);
+      assert.strictEqual(auth.response, undefined);
+    } finally {
+      process.env.ADMIN_PASSKEY = originalPasskey;
+    }
   });
 
   test('rejects unauthorized admin configuration requests when passkey is missing or invalid', async () => {

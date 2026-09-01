@@ -75,10 +75,13 @@ export default function AdminGlobalMacros() {
       sessionData.session?.access_token ||
       (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
+    const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
     const headers: Record<string, string> = {
-      'x-admin-passkey': 'draftpilot-root-2026',
       'Content-Type': 'application/json',
     };
+    if (adminPasskey) {
+      headers['x-admin-passkey'] = adminPasskey;
+    }
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }

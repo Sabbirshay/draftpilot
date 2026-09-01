@@ -44,14 +44,23 @@ CREATE POLICY "Users can insert own profile" ON users
 CREATE POLICY "Users can update own profile" ON users
   FOR UPDATE TO authenticated
   USING (id = auth.uid())
-  WITH CHECK (id = auth.uid());
+  WITH CHECK (
+    id = auth.uid()
+    AND team_id = (SELECT team_id FROM users WHERE id = auth.uid())
+    AND role = (SELECT role FROM users WHERE id = auth.uid())
+  );
 
 -- 4. Teams Table
 DROP POLICY IF EXISTS "Users can insert team" ON teams;
 DROP POLICY IF EXISTS "Users can view team" ON teams;
 CREATE POLICY "Users can insert team" ON teams
   FOR INSERT TO authenticated
-  WITH CHECK (true);
+  WITH CHECK (
+    plan = 'free'
+    AND monthly_draft_limit = 50
+    AND stripe_customer_id IS NULL
+    AND stripe_subscription_id IS NULL
+  );
 
 CREATE POLICY "Users can view team" ON teams
   FOR SELECT TO authenticated

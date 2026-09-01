@@ -248,34 +248,30 @@ Support Team
 });
 
 describe('Adversarial Challenge 2: AdminGuard Passkey Authentication & Session Resilience', () => {
-  const MASTER_PASSKEYS = ['draftpilot-root-2026', 'admin2026', 'root'];
-
   test('passkey validation: rejects empty string, spaces, and invalid passkeys', () => {
     const validatePasskey = (key: string, envKey?: string) => {
       const clean = key.trim();
       if (!clean) return false;
-      return MASTER_PASSKEYS.includes(clean) || (Boolean(envKey) && clean === envKey);
+      return Boolean(envKey) && clean === envKey;
     };
 
-    assert.strictEqual(validatePasskey(''), false);
-    assert.strictEqual(validatePasskey('   '), false);
-    assert.strictEqual(validatePasskey('wrong-password'), false);
-    assert.strictEqual(validatePasskey('123456'), false);
-    assert.strictEqual(validatePasskey('admin'), false);
+    assert.strictEqual(validatePasskey('', 'valid-secret'), false);
+    assert.strictEqual(validatePasskey('   ', 'valid-secret'), false);
+    assert.strictEqual(validatePasskey('wrong-password', 'valid-secret'), false);
+    assert.strictEqual(validatePasskey('123456', 'valid-secret'), false);
+    assert.strictEqual(validatePasskey('admin', 'valid-secret'), false);
   });
 
-  test('passkey validation: accepts all standard master passkeys and trimmed whitespace', () => {
+  test('passkey validation: accepts configured environment passkey and trimmed whitespace', () => {
     const validatePasskey = (key: string, envKey?: string) => {
       const clean = key.trim();
       if (!clean) return false;
-      return MASTER_PASSKEYS.includes(clean) || (Boolean(envKey) && clean === envKey);
+      return Boolean(envKey) && clean === envKey;
     };
 
-    assert.strictEqual(validatePasskey('draftpilot-root-2026'), true);
-    assert.strictEqual(validatePasskey('  draftpilot-root-2026  '), true);
-    assert.strictEqual(validatePasskey('admin2026'), true);
-    assert.strictEqual(validatePasskey('root'), true);
     assert.strictEqual(validatePasskey('custom-env-key-999', 'custom-env-key-999'), true);
+    assert.strictEqual(validatePasskey('  custom-env-key-999  ', 'custom-env-key-999'), true);
+    assert.strictEqual(validatePasskey('different-key', 'custom-env-key-999'), false);
   });
 
   test('session reload simulation: preserves unlock state from sessionStorage', () => {
@@ -298,20 +294,27 @@ describe('Adversarial Challenge 2: AdminGuard Passkey Authentication & Session R
   });
 
   test('verifySuperAdmin: validates x-admin-passkey header on API routes', async () => {
-    // Valid passkey
-    const reqValid = new Request('http://localhost:3000/api/admin/ai-config', {
-      headers: { 'x-admin-passkey': 'draftpilot-root-2026' },
-    });
-    const authValid = await verifySuperAdmin(reqValid);
-    assert.strictEqual(authValid.authorized, true);
+    const originalPasskey = process.env.ADMIN_PASSKEY;
+    try {
+      process.env.ADMIN_PASSKEY = 'test-challenge-passkey-123';
 
-    // Invalid passkey
-    const reqInvalid = new Request('http://localhost:3000/api/admin/ai-config', {
-      headers: { 'x-admin-passkey': 'fake-key' },
-    });
-    const authInvalid = await verifySuperAdmin(reqInvalid);
-    assert.strictEqual(authInvalid.authorized, false);
-    assert.strictEqual(authInvalid.response?.status, 401);
+      // Valid passkey
+      const reqValid = new Request('http://localhost:3000/api/admin/ai-config', {
+        headers: { 'x-admin-passkey': 'test-challenge-passkey-123' },
+      });
+      const authValid = await verifySuperAdmin(reqValid);
+      assert.strictEqual(authValid.authorized, true);
+
+      // Invalid passkey
+      const reqInvalid = new Request('http://localhost:3000/api/admin/ai-config', {
+        headers: { 'x-admin-passkey': 'fake-key' },
+      });
+      const authInvalid = await verifySuperAdmin(reqInvalid);
+      assert.strictEqual(authInvalid.authorized, false);
+      assert.strictEqual(authInvalid.response?.status, 401);
+    } finally {
+      process.env.ADMIN_PASSKEY = originalPasskey;
+    }
   });
 
   test('verifySuperAdmin: rejects unauthorized requests with missing headers', async () => {

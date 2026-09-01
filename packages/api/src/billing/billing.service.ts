@@ -104,6 +104,10 @@ export class BillingService {
     }
   }
 
+  constructWebhookEvent(rawBody: string | Buffer, signature: string, secret: string): Stripe.Event {
+    return this.stripe.webhooks.constructEvent(rawBody, signature, secret);
+  }
+
   async handleWebhook(event: Stripe.Event) {
     const client = this.supabase.getClient();
     

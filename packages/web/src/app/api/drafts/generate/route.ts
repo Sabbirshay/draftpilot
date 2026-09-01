@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/admin-auth';
+import { scrubPII } from '@/lib/pii-scrubber';
 
 export const dynamic = 'force-dynamic';
 
@@ -207,6 +208,17 @@ export async function POST(req: NextRequest) {
 
   // 2. Rate Limiting Check (20 requests per 60 seconds)
   const now = Date.now();
+  if (userRequestTimestamps.size > 500) {
+    userRequestTimestamps.forEach((times, uid) => {
+      const valid = times.filter((t) => now - t < 60000);
+      if (valid.length === 0) {
+        userRequestTimestamps.delete(uid);
+      } else {
+        userRequestTimestamps.set(uid, valid);
+      }
+    });
+  }
+
   const timestamps = (userRequestTimestamps.get(user.id) || []).filter((t) => now - t < 60000);
   if (timestamps.length >= 20) {
     return NextResponse.json(
@@ -230,6 +242,46 @@ export async function POST(req: NextRequest) {
 
     const teamId = dbUser?.team_id;
 
+    // Monthly Quota Check
+    const month = new Date().toISOString().slice(0, 7) + '-01';
+    let currentDraftsUsed = 0;
+    let monthlyLimit = 50;
+    let usageRecordId: string | null = null;
+
+    if (teamId) {
+      const { data: teamData } = await supabaseAdmin
+        .from('teams')
+        .select('plan, monthly_draft_limit')
+        .eq('id', teamId)
+        .single();
+
+      monthlyLimit = teamData?.monthly_draft_limit || (teamData?.plan === 'team' ? 1000 : 50);
+
+      const { data: usageData } = await supabaseAdmin
+        .from('usage')
+        .select('id, draft_count')
+        .eq('team_id', teamId)
+        .eq('month', month)
+        .single();
+
+      if (usageData) {
+        usageRecordId = usageData.id;
+        currentDraftsUsed = usageData.draft_count || 0;
+      }
+
+      if (currentDraftsUsed >= monthlyLimit) {
+        return NextResponse.json(
+          {
+            error: `Monthly draft limit reached for this workspace (${currentDraftsUsed}/${monthlyLimit} used). Please upgrade your plan.`,
+            quotaExceeded: true,
+            limit: monthlyLimit,
+            used: currentDraftsUsed,
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     // 3. Fetch Platform AI Settings securely on the server
     const { data: settings } = await supabaseAdmin
       .from('platform_settings')
@@ -237,7 +289,9 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .single();
 
-    const customerName = extractSenderName(threadContent || '');
+    const rawThreadContent = (threadContent || '').trim();
+    const scrubbedThreadContent = scrubPII(rawThreadContent);
+    const customerName = extractSenderName(scrubbedThreadContent);
     let draftText = '';
     let openRouterSuccess = false;
 
@@ -272,7 +326,7 @@ CRITICAL INSTRUCTIONS:
           agentGuidanceContext = `### Agent Guidance / Custom Instruction:\n${trimmedHint}\n\n`;
         }
 
-        const userPrompt = `Customer Message:\n${threadContent}\n\n${knowledgeContext}${agentGuidanceContext}Write the clean, direct customer email reply now:`;
+        const userPrompt = `Customer Message:\n${scrubbedThreadContent}\n\n${knowledgeContext}${agentGuidanceContext}Write the clean, direct customer email reply now:`;
 
         // 1. Try Primary Model (with 8s timeout)
         let openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -358,27 +412,43 @@ CRITICAL INSTRUCTIONS:
           draftText = draftText.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
         }
       } else {
-        draftText = synthesizeSmartSupportDraft(threadContent, customerName);
+        draftText = synthesizeSmartSupportDraft(scrubbedThreadContent, customerName);
       }
     }
 
-    // 5. Insert Draft History
+    const scrubbedDraftText = scrubPII(draftText);
+
+    // 5. Insert Draft History & Increment Usage
     if (teamId) {
       try {
         await supabaseAdmin.from('draft_history').insert({
           team_id: teamId,
           user_id: user.id,
-          thread_snippet: (threadContent || '').slice(0, 200),
-          generated_draft: draftText,
+          thread_snippet: (scrubbedThreadContent || '').slice(0, 200),
+          generated_draft: scrubbedDraftText,
           macro_used_id: matchedMacro?.id || null,
         });
+
+        // Increment monthly usage count in the usage table
+        if (usageRecordId) {
+          await supabaseAdmin
+            .from('usage')
+            .update({ draft_count: currentDraftsUsed + 1 })
+            .eq('id', usageRecordId);
+        } else {
+          await supabaseAdmin.from('usage').insert({
+            team_id: teamId,
+            month,
+            draft_count: 1,
+          });
+        }
       } catch (histErr) {
-        console.warn('Draft history logging note:', histErr);
+        console.warn('Draft history / usage logging note:', histErr);
       }
     }
 
     return NextResponse.json({
-      draft: draftText,
+      draft: scrubbedDraftText,
       macroUsed: matchedMacro?.name || null,
       confidence: matchedMacro ? 96 : 88,
     });

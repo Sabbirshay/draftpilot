@@ -48,6 +48,24 @@ describe('P2-Finding 5: PII Scrubber Redaction Gaps', () => {
     assert.ok(output.includes('[SECRET_REDACTED]'));
   });
 
+  test('redacts standalone JWT tokens without Bearer prefix', () => {
+    const jwt = 'Here is the raw token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c for verification';
+    const output = scrubPII(jwt);
+    assert.strictEqual(output, 'Here is the raw token: [TOKEN_REDACTED] for verification');
+    assert.ok(!output.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'));
+  });
+
+  test('redacts standalone OpenAI sk- keys, GitHub tokens, and AWS keys', () => {
+    const openAi = 'My key is sk-proj-12345678901234567890abcdef1234567890 in config.';
+    const ghp = 'GitHub token is ghp_1234567890abcdefghijklmnopqrstuvwxyz12.';
+    const aws = 'AWS key is AKIAIOSFODNN7EXAMPLE in config.';
+
+    assert.ok(scrubPII(openAi).includes('[TOKEN_REDACTED]'));
+    assert.ok(scrubPII(ghp).includes('[TOKEN_REDACTED]'));
+    assert.ok(scrubPII(aws).includes('[TOKEN_REDACTED]'));
+    assert.ok(!scrubPII(openAi).includes('1234567890abcdef1234567890'));
+  });
+
   test('preserves clean non-PII support inquiry text untouched', () => {
     const clean = 'Hi, what is your standard 30-day refund policy for medium t-shirts?';
     assert.strictEqual(scrubPII(clean), clean);

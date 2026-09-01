@@ -40,6 +40,6 @@
     "default_path": "src/sidepanel/index.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://*.supabase.co https://draftpilot-web.vercel.app;"
   }
 }

@@ -11,8 +11,6 @@ const DEFAULT_ADMIN_EMAILS = [
   'admin@draftpilot.com',
 ];
 
-const ADMIN_MASTER_PASSKEY = process.env.NEXT_PUBLIC_ADMIN_PASSKEY || 'draftpilot-root-2026';
-
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,7 +35,16 @@ export default function AdminLoginPage() {
         throw new Error('This account does not have Superadmin privileges.');
       }
 
-      if (passkey && passkey.trim() !== ADMIN_MASTER_PASSKEY && passkey.trim() !== 'admin2026') {
+      const passkeyClean = passkey.trim();
+      if (!passkeyClean) {
+        throw new Error('Master Security Passkey is required for Superadmin login.');
+      }
+
+      // Verify passkey against server API
+      const verifyRes = await fetch('/api/admin/metrics', {
+        headers: { 'x-admin-passkey': passkeyClean },
+      });
+      if (!verifyRes.ok) {
         throw new Error('Invalid Superadmin Master Passkey.');
       }
 
@@ -50,6 +57,7 @@ export default function AdminLoginPage() {
 
       if (data.user) {
         sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
+        sessionStorage.setItem('draftpilot_admin_passkey', passkeyClean);
         window.location.href = '/admin';
       }
     } catch (err: any) {
@@ -115,6 +123,7 @@ export default function AdminLoginPage() {
             </label>
             <input
               type="password"
+              required
               value={passkey}
               onChange={(e) => setPasskey(e.target.value)}
               placeholder="••••••••••••"

@@ -4,15 +4,35 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   
+  // Security Headers Middleware (Helmet standards)
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Download-Options', 'noopen');
+    res.setHeader('X-XSS-Protection', '0');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.removeHeader('X-Powered-By');
+    next();
+  });
+
   const port = process.env.PORT || 3001;
   const allowedOrigins: (string | RegExp)[] = [
     'https://draftpilot-web.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
-    /^chrome-extension:\/\/[a-z]{32}$/,
   ];
+
+  if (process.env.EXTENSION_ID) {
+    allowedOrigins.push(`chrome-extension://${process.env.EXTENSION_ID}`);
+  } else {
+    allowedOrigins.push(/^chrome-extension:\/\/[a-z]{32}$/);
+  }
 
   if (process.env.WEB_ORIGIN) {
     allowedOrigins.push(process.env.WEB_ORIGIN);
