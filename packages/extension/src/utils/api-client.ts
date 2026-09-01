@@ -29,7 +29,7 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
       text = (emailMatch[1] + emailMatch[2]).trim();
     } else {
       // Look for a "**Final Response:**" or "**Draft:**" or "Reply:" marker
-      const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
+      const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email|Response):\*\*/i);
       if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
         text = splitMatch[1].trim();
       } else {
@@ -48,25 +48,49 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
     return '';
   }
 
-  // 4. Remove leading/trailing markdown code fences (```markdown ... ```)
-  text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+  // 4. Robust Code Fence & Wrapper Removal (handles preambles and postscripts)
+  const codeBlockMatch = text.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
+  if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
+    text = codeBlockMatch[1].trim();
+  } else {
+    text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+  }
 
-  // 5. Remove leading meta labels like "Draft reply:" or "Here is the reply:"
+  // 5. Remove Meta Headers & Label Lines (handles multiple stacked headers)
+  let prevText = '';
+  while (prevText !== text) {
+    prevText = text;
+    text = text
+      .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|Subject:[^\n]*|Email:?|Suggested Reply:?)\s*\n+/i, '')
+      .trim();
+  }
+
+  // 6. Template Variable Normalization
   text = text
-    .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
-    .trim();
+    .replace(/{{name}}/gi, customerName)
+    .replace(/{{customer_name}}/gi, customerName)
+    .replace(/\[Customer(?:\s*Name)?\]/gi, customerName)
+    .replace(/\[Name\]/gi, customerName)
+    .replace(/\[Client(?:\s*Name)?\]/gi, customerName);
 
-  // 6. Replace template variables with extracted customer name if still present
+  // 7. Sign-off Placeholder Scrubbing
+  const defaultSignoff = 'Customer Support Team';
   text = text
-    .replace(/{{name}}/g, customerName)
-    .replace(/{{customer_name}}/g, customerName)
-    .replace(/\[Customer\]/g, customerName)
-    .replace(/\[Name\]/g, customerName);
+    .replace(/\[Your Name\]/gi, defaultSignoff)
+    .replace(/\[Agent Name\]/gi, defaultSignoff)
+    .replace(/\[Support Representative\]/gi, defaultSignoff)
+    .replace(/\[Representative Name\]/gi, defaultSignoff)
+    .replace(/\[Your Title\]/gi, defaultSignoff)
+    .replace(/\[Company Name\]/gi, 'DraftPilot Support')
+    .replace(/\[Support Team\]/gi, defaultSignoff)
+    .replace(/{{agent_name}}/gi, defaultSignoff);
 
-  // 7. Personalize generic "Hi there," or "Hi," to "Hi [Sender Name],"
+  // 8. Personalize generic "Hi there," or "Hi," to "Hi [Sender Name],"
   if (customerName && customerName.toLowerCase() !== 'there') {
     text = text.replace(/^(?:Hi|Hello|Dear)\s+there,/im, `Hi ${customerName},`);
     text = text.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
+    text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Name\],/im, `Hi ${customerName},`);
+    text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Customer\],/im, `Hi ${customerName},`);
   }
 
   return text;
@@ -589,14 +613,53 @@ export class ApiClient {
           draftText = draftText.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
         }
       } else {
-        if (lowerThread.includes('refund') || lowerThread.includes('return')) {
-          draftText = `Hi ${customerName},\n\nThank you for reaching out to us. I'd be happy to help you with your return or refund request.\n\nPlease confirm your order number, and I will gladly process this and send over your prepaid return label right away.\n\nBest regards,\nCustomer Support Team`;
-        } else if (lowerThread.includes('delay') || lowerThread.includes('where is') || lowerThread.includes('tracking')) {
-          draftText = `Hi ${customerName},\n\nThanks for checking in on your shipment! I understand waiting for an order can be frustrating, and I apologize for the delay.\n\nI've checked on your shipment status with our carrier and it is actively on its way. You should see delivery within the next 2-3 business days.\n\nPlease let me know if you have any further questions!\n\nBest regards,\nCustomer Support Team`;
-        } else if (lowerThread.includes('password') || lowerThread.includes('login') || lowerThread.includes('account')) {
-          draftText = `Hi ${customerName},\n\nI can certainly assist you with accessing your account. I have initiated a secure password reset for your email.\n\nPlease check your inbox for the reset link (and your spam folder if it doesn't arrive within 5 minutes).\n\nLet us know if you need any additional help!\n\nBest regards,\nCustomer Support Team`;
+        const name = customerName && customerName.toLowerCase() !== 'there' ? customerName : 'there';
+        if (lowerThread.includes('refund') || lowerThread.includes('return') || lowerThread.includes('money back')) {
+          draftText = `Hi ${name},\n\nThank you for reaching out to us. I completely understand and would be glad to help you with your return and refund request.\n\nI have located your account and initiated the refund process in accordance with our return policy. You should see the credit reflected on your original payment method within 3–5 business days.\n\nPlease don't hesitate to reach out if you have any questions in the meantime!\n\nBest regards,\nCustomer Support Team`;
+        } else if (
+          lowerThread.includes('track') ||
+          lowerThread.includes('shipping') ||
+          lowerThread.includes('where is my order') ||
+          lowerThread.includes('where is') ||
+          lowerThread.includes('delivery') ||
+          lowerThread.includes('delay') ||
+          lowerThread.includes('package')
+        ) {
+          draftText = `Hi ${name},\n\nThanks for checking in on your order status!\n\nYour shipment is on track and moving smoothly with our carrier. You can view real-time tracking milestone updates directly using the link in your original confirmation email.\n\nIf you encounter any transit delays or need address adjustments, just let me know and I will be happy to assist.\n\nWarm regards,\nCustomer Support Team`;
+        } else if (
+          lowerThread.includes('password') ||
+          lowerThread.includes('login') ||
+          lowerThread.includes('2fa') ||
+          lowerThread.includes('account') ||
+          lowerThread.includes('locked') ||
+          lowerThread.includes('reset') ||
+          lowerThread.includes('sign in')
+        ) {
+          draftText = `Hi ${name},\n\nThank you for contacting support regarding your account access.\n\nI've generated a secure password reset link for you. For your protection, please make sure you are clicking the link from your registered device. If two-factor authentication (2FA) is enabled, have your authenticator app ready.\n\nLet us know if you need any additional guidance getting back into your account!\n\nBest regards,\nCustomer Support Team`;
+        } else if (
+          lowerThread.includes('invoice') ||
+          lowerThread.includes('receipt') ||
+          lowerThread.includes('charge') ||
+          lowerThread.includes('card') ||
+          lowerThread.includes('billing') ||
+          lowerThread.includes('subscription') ||
+          lowerThread.includes('payment')
+        ) {
+          draftText = `Hi ${name},\n\nThank you for contacting our billing department.\n\nI've reviewed your account history and confirmed your recent billing statement. You can download an itemized PDF copy of all past invoices anytime directly from your account billing portal.\n\nIf you'd like to update your payment method or need a custom VAT/tax invoice, feel free to reply and I'll take care of it immediately.\n\nBest regards,\nCustomer Support Team`;
+        } else if (
+          lowerThread.includes('error') ||
+          lowerThread.includes('bug') ||
+          lowerThread.includes('crash') ||
+          lowerThread.includes('issue') ||
+          lowerThread.includes('not working') ||
+          lowerThread.includes('broken') ||
+          lowerThread.includes('failed') ||
+          lowerThread.includes('troubleshoot') ||
+          lowerThread.includes('glitch')
+        ) {
+          draftText = `Hi ${name},\n\nThank you for reaching out regarding the issue you are experiencing. I apologize for the inconvenience this has caused.\n\nTo help resolve this quickly, could you please try clearing your browser cache or testing in an incognito window? If the issue persists, please reply with any relevant error codes, screenshots, or the exact steps to reproduce the problem so our technical team can investigate immediately.\n\nWe appreciate your patience and look forward to getting this sorted out for you!\n\nBest regards,\nCustomer Support Team`;
         } else {
-          draftText = `Hi ${customerName},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
+          draftText = `Hi ${name},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
         }
       }
     }

@@ -1,36 +1,42 @@
 # Original User Request
 
-## 2026-08-31T16:34:37Z
+## 2026-08-31T17:18:27Z
 
-Perform a comprehensive parallel audit and diagnosis across the user dashboard, Chrome extension, and super admin control center of DraftPilot to ensure every button, interactive feature, state update, and cross-party live data synchronization operates correctly without regressions.
+<USER_REQUEST>
+Perform a comprehensive diagnosis and enhancement of the DraftPilot AI system across the Next.js API (`/api/drafts/generate`), NestJS AI backend (`AiProviderService`), Super Admin AI configuration (`AdminAIConfig`), and Chrome Extension client to ensure contextual instructions, model fallback cascades, prompt assembly, output sanitization, and live playground testing operate flawlessly without regressions.
 
 Working directory: /home/md-roni-ahamed/Test project
 Integrity mode: development
 
 ## Requirements
 
-### R1. User End Interactive Feature Diagnosis
-Audit every interactive button, input field, modal, navigation route, macro manager, AI draft synthesizer, and settings panel in the Web Dashboard (`/dashboard`, `/login`, `/join`) and Chrome Extension (`packages/extension`). Verify that click handlers, API dispatches, form validations, and user feedback states work without runtime errors.
+### R1. Custom Instruction & Contextual Prompt Compilation
+Audit and verify that custom AI instructions (`macroHint` / user prompt overrides) and matched macros / knowledge chunks are properly compiled into the final LLM prompt context across both Next.js (`/api/drafts/generate`) and NestJS (`AiProviderService`) AI pipelines, ensuring user guidance directly shapes the output.
 
-### R2. Super Admin Control Suite Diagnosis
-Audit all super admin dashboard modules (`/admin`, `/admin/login`), including Workspace & Team Management, Billing & Quota Analytics, Global Macro Distribution, Feature Flag Toggles, and AI Routing/Model Configuration. Ensure all admin actions (e.g. tier modification, custom instruction updates, flag switches) properly persist and mutate backend state.
+### R2. Dual-Model Fallback & Smart Support Synthesizer Resilience
+Verify and harden the multi-tier fallback cascade (primary model -> secondary fallback -> local domain-aware smart support synthesizer) so draft generation gracefully recovers during OpenRouter upstream rate limits (429), timeouts, network drops, or missing credentials.
 
-### R3. Cross-Party Real-Time Synchronization & Live State Match
-Cross-verify that interactions performed on the user end (draft generation counts, macro creation, usage limits) immediately reflect in real-time within the admin overview metrics and activity logs, and conversely, that admin-level policy, quota, or model updates take effect immediately on the user client.
+### R3. Output Sanitization & Format Enforcement
+Ensure all AI outputs are strictly sanitized to remove reasoning artifacts (such as `<think>` blocks, reasoning chains, analysis headers, and markdown code fences) and normalize customer greetings (`Hi [Name],`) and professional sign-offs.
 
-### R4. Non-Destructive Integrity & Build Verification
-Preserve all existing working functionality. Verify that any code fixes pass complete static typing and production build suites across all three sub-packages (`packages/web`, `packages/api`, `packages/extension`).
+### R4. Super Admin AI Playground & Dynamic Routing
+Validate the Super Admin AI Configuration suite (`/admin` -> AI Config) for live model switching, temperature/token tuning, custom system prompt persistence, and interactive playground draft testing.
+
+### R5. Non-Destructive Integrity & Build Verification
+Preserve all existing functionality and ensure complete test suites (`pnpm -r test`) and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) compile cleanly with zero errors.
 
 ## Acceptance Criteria
 
-### User Interface & Client Experience
-- [ ] Every button, link, and form across the User Dashboard (`/dashboard`), Chrome Extension popup/sidepanel, and auth views executes cleanly without uncaught exceptions or broken promises.
-- [ ] AI draft generation, prompt customization, editable reply box, and one-click macro insertion operate reliably with accurate visual feedback.
+### Prompt Compilation & Quality
+- [ ] Passing custom instructions (e.g. "Apologize and offer discount") visibly shapes the generated reply.
+- [ ] Output is clean plain text ready for email insertion, with no leftover reasoning tokens or markdown wrapper blocks.
 
-### Admin Controls & Cross-Match
-- [ ] Every super admin sub-tab (`AdminOverview`, `AdminWorkspaces`, `AdminBillingAnalytics`, `AdminFeatureFlags`, `AdminGlobalMacros`, `AdminAIConfig`, `AdminGuard`) loads data accurately and executes mutations reliably.
-- [ ] Changes to workspace plans, rate limits, or AI configurations in the admin panel immediately influence user limits and available models.
+### Fallback Reliability
+- [ ] When upstream providers return errors or rate limits, the system seamlessly transitions to fallback models or the domain synthesizer without crashing or stalling.
+- [ ] Offline / mock testing produces contextually relevant replies for customer support intents (refunds, tracking, billing, access).
 
-### Cross-System Data Consistency & Build Health
-- [ ] User actions (e.g. drafted emails, active tokens) and administrative statistics show matching, synchronized values across both dashboards.
-- [ ] `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` all succeed with zero compilation or lint errors.
+### Admin Controls & Build Health
+- [ ] Admin AI configuration updates persist to `platform_settings` and take effect immediately on draft generation requests.
+- [ ] `pnpm test`, `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` all succeed with zero errors.
+
+</USER_REQUEST>

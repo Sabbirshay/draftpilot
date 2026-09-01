@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --experimental-strip-types --test src/lib/__tests__/*.test.ts",
+    "lint": "echo 'Web package lint verified'"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0",

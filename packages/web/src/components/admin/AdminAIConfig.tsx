@@ -9,15 +9,36 @@ const OPENROUTER_FREE_MODELS = [
   { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B IT', provider: 'Google DeepMind', badge: 'Free · High Reasoning' },
 ];
 
-function generateSmartSupportReply(inquiry: string): string {
+function generateSmartSupportReply(inquiry: string, customerName = 'there'): string {
   const lower = inquiry.toLowerCase();
-  if (lower.includes('return') || lower.includes('refund') || lower.includes('exchange') || lower.includes('bought') || lower.includes('jacket')) {
-    return `Hi there,\n\nThank you for reaching out to us!\n\nYes, absolutely. Our return window is 30 days from delivery, so you are eligible to return or exchange your item.\n\nTo get this started:\n1. Reply with your original Order ID or receipt.\n2. Let us know whether you prefer a replacement size/item or a full refund to your original payment method.\n\nOnce we receive the returned item, we will process your request within 2-3 business days. Let us know if you have any questions!\n\nBest regards,\nCustomer Support Team`;
+  
+  // 1. Refund & Return Intent
+  if (lower.includes('return') || lower.includes('refund') || lower.includes('exchange') || lower.includes('bought') || lower.includes('jacket') || lower.includes('money back') || lower.includes('cancel order')) {
+    return `Hi ${customerName},\n\nThank you for reaching out to us!\n\nYes, absolutely. Our return window is 30 days from delivery, so you are eligible to return or exchange your item.\n\nTo get this started:\n1. Reply with your original Order ID or receipt.\n2. Let us know whether you prefer a replacement size/item or a full refund to your original payment method.\n\nOnce we receive the returned item, we will process your request within 2-3 business days. Let us know if you have any questions!\n\nBest regards,\nCustomer Support Team`;
   }
-  if (lower.includes('shipping') || lower.includes('track') || lower.includes('order') || lower.includes('arrive') || lower.includes('delay')) {
-    return `Hi there,\n\nThank you for reaching out! I understand you are inquiring about your shipment status.\n\nCould you please share your order number? Once provided, I will look into the tracking details immediately and update you on the delivery timeline.\n\nBest regards,\nCustomer Support Team`;
+  
+  // 2. Order Status & Tracking Intent
+  if (lower.includes('shipping') || lower.includes('track') || lower.includes('order') || lower.includes('arrive') || lower.includes('delay') || lower.includes('where is') || lower.includes('carrier') || lower.includes('transit')) {
+    return `Hi ${customerName},\n\nThanks for checking in on your order status!\n\nYour shipment is on track and moving smoothly with our carrier. You can view real-time tracking milestone updates directly using the link in your original confirmation email.\n\nIf you encounter any transit delays or need address adjustments, just let me know and I will be happy to assist.\n\nBest regards,\nCustomer Support Team`;
   }
-  return `Hi there,\n\nThank you for contacting DraftPilot support! I have received your inquiry and would be glad to help.\n\nCould you please provide a few additional details regarding your request so I can ensure this is handled as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
+
+  // 3. Password & Account Access Intent
+  if (lower.includes('password') || lower.includes('login') || lower.includes('2fa') || lower.includes('mfa') || lower.includes('account') || lower.includes('locked') || lower.includes('access') || lower.includes('auth')) {
+    return `Hi ${customerName},\n\nThank you for contacting support regarding your account access.\n\nI have generated a secure password reset link for your account. For your protection, please ensure you click the link from your registered device. If two-factor authentication (2FA) is enabled, have your authenticator app ready.\n\nLet us know if you need any additional guidance getting back into your account!\n\nBest regards,\nSecurity & Support Team`;
+  }
+
+  // 4. Billing & Invoices Intent
+  if (lower.includes('invoice') || lower.includes('receipt') || lower.includes('charge') || lower.includes('card') || lower.includes('billing') || lower.includes('payment') || lower.includes('subscription') || lower.includes('vat')) {
+    return `Hi ${customerName},\n\nThank you for contacting our billing department.\n\nI have reviewed your account history and confirmed your recent billing statement. You can download an itemized PDF copy of all past invoices anytime directly from your account billing portal.\n\nIf you would like to update your payment method or need a custom VAT/tax invoice, feel free to reply and I will take care of it immediately.\n\nBest regards,\nBilling Operations`;
+  }
+
+  // 5. Technical Troubleshooting & Bug Reports Intent
+  if (lower.includes('bug') || lower.includes('error') || lower.includes('issue') || lower.includes('broken') || lower.includes('crash') || lower.includes('not working') || lower.includes('glitch') || lower.includes('troubleshoot')) {
+    return `Hi ${customerName},\n\nThank you for reporting this issue to our technical support team.\n\nI apologize for any disruption this has caused. We have logged the error details and our engineering team is actively investigating the behavior.\n\nIn the meantime, could you please try clearing your browser cache or testing in an incognito window? If the problem persists, replying with a quick screenshot or console log will help us resolve it even faster.\n\nBest regards,\nTechnical Support Team`;
+  }
+
+  // Default General Inquiry Response
+  return `Hi ${customerName},\n\nThank you for contacting DraftPilot support! I have received your inquiry and would be glad to help.\n\nCould you please provide a few additional details regarding your request so I can ensure this is handled as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
 }
 
 export default function AdminAIConfig() {
@@ -370,7 +391,12 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
       if (data?.choices && data.choices[0]) {
         setRateLimitWarning(null);
         const rawContent = data.choices[0].message.content || '';
-        let cleaned = rawContent.trim().replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        let cleaned = rawContent.trim();
+        
+        // 1. Remove XML/HTML style <think>...</think> reasoning blocks
+        cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+        // 2. Multi-paragraph reasoning / thinking process removal (DeepSeek R1 / Gemma 4 / Qwen)
         if (
           /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
             cleaned
@@ -388,10 +414,42 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
             }
           }
         }
-        cleaned = cleaned.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+
+        // 3. Fallback check for residual thinking analysis fragments
+        if (
+          /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(cleaned) ||
+          cleaned.startsWith('1.  **Analyze') ||
+          cleaned.startsWith('1. **Analyze')
+        ) {
+          cleaned = '';
+        }
+
+        // 4. Code block removal (handles preambles and postscripts around code fences)
+        const codeBlockMatch = cleaned.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
+        if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
+          cleaned = codeBlockMatch[1].trim();
+        } else {
+          cleaned = cleaned.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+        }
+
+        // 5. Remove Meta Headers & Label Lines
         cleaned = cleaned
-          .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?)\s*\n+/i, '')
+          .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?|Suggested Reply:?)\s*\n+/i, '')
           .trim();
+
+        // 6. Template Variable & Sign-off Placeholder Scrubbing
+        cleaned = cleaned
+          .replace(/{{name}}/gi, 'there')
+          .replace(/{{customer_name}}/gi, 'there')
+          .replace(/\[Customer(?:\s*Name)?\]/gi, 'there')
+          .replace(/\[Name\]/gi, 'there')
+          .replace(/\[Client(?:\s*Name)?\]/gi, 'there')
+          .replace(/\[Your Name\]/gi, 'Support Team')
+          .replace(/\[Agent Name\]/gi, 'Support Team')
+          .replace(/\[Representative Name\]/gi, 'Support Team')
+          .replace(/\[Company Name\]/gi, 'DraftPilot Support')
+          .replace(/\[Support Team\]/gi, 'Support Team')
+          .replace(/{{agent_name}}/gi, 'Support Team');
 
         const prefix = isFallback ? `[⚡ Auto-Fallback Active: Generated with ${usedModel}]\n\n` : '';
         setTestResponse(prefix + (cleaned || rawContent));

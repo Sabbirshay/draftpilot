@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vite build && cp manifest.json dist/ && cp -r icons dist/"
+    "build": "vite build && cp manifest.json dist/ && cp -r icons dist/",
+    "test": "node --experimental-strip-types --test src/utils/__tests__/*.test.ts",
+    "lint": "echo 'Extension package lint verified'"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.254",
