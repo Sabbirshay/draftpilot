@@ -41,6 +41,23 @@ function generateSmartSupportReply(inquiry: string, customerName = 'there'): str
   return `Hi ${customerName},\n\nThank you for contacting DraftPilot support! I have received your inquiry and would be glad to help.\n\nCould you please provide a few additional details regarding your request so I can ensure this is handled as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
 }
 
+export interface OpenRouterTelemetry {
+  label: string | null;
+  usage: number;
+  limit: number | null;
+  is_free_tier: boolean;
+  rate_limit?: {
+    requests: number;
+    interval: string;
+  };
+}
+
+export interface UpstreamErrorWarning {
+  category: 'daily_cap' | 'rate_limit' | 'congestion' | 'credits_exhausted' | 'auth_error' | 'general';
+  verbatimMessage: string;
+  statusCode: number;
+}
+
 export default function AdminAIConfig() {
   const [dbId, setDbId] = useState<string | null>(null);
   const [provider, setProvider] = useState<'openrouter' | 'openai' | 'offline'>('openrouter');
@@ -65,6 +82,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
   // UI State
   const [showKey, setShowKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'untested' | 'testing' | 'valid' | 'invalid'>('untested');
+  const [keyTelemetry, setKeyTelemetry] = useState<OpenRouterTelemetry | null>(null);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
   // Playground State
@@ -72,7 +90,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
   const [testResponse, setTestResponse] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testMetrics, setTestMetrics] = useState({ tokens: 0, latency: 0 });
-  const [rateLimitWarning, setRateLimitWarning] = useState<string | null>(null);
+  const [rateLimitWarning, setRateLimitWarning] = useState<UpstreamErrorWarning | null>(null);
 
   // 1. Initial Load: Immediate LocalStorage cache + Supabase cloud synchronization
   useEffect(() => {
@@ -201,6 +219,13 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         const json = await res.json().catch(() => null);
         if (res.ok && json?.data) {
           setKeyStatus('valid');
+          setKeyTelemetry({
+            label: json.data.label || null,
+            usage: Number(json.data.usage) || 0,
+            limit: json.data.limit !== undefined && json.data.limit !== null ? Number(json.data.limit) : null,
+            is_free_tier: Boolean(json.data.is_free_tier),
+            rate_limit: json.data.rate_limit,
+          });
           const label = json.data.label ? ` (${json.data.label})` : '';
           setKeyVerifyMessage(`Verified & Active${label}`);
           if (typeof window !== 'undefined') {
@@ -208,10 +233,12 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           }
         } else {
           setKeyStatus('invalid');
+          setKeyTelemetry(null);
           setKeyVerifyMessage(json?.error?.message || 'Invalid OpenRouter Key');
         }
       } catch (err: any) {
         setKeyStatus('invalid');
+        setKeyTelemetry(null);
         setKeyVerifyMessage('Network error connecting to OpenRouter');
       }
     } else if (provider === 'openai') {
@@ -458,23 +485,46 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           latency: latency,
         });
       } else {
-        const errMsg = data?.error?.message || '';
-        if (errMsg.includes('Rate limit') || errMsg.includes('credits') || response.status === 429) {
-          setRateLimitWarning(errMsg);
-          const smartReply = generateSmartSupportReply(testThread);
-          setTestResponse(smartReply);
-          setTestMetrics({
-            tokens: 135,
-            latency: latency,
-          });
-        } else {
-          setRateLimitWarning(null);
-          setTestResponse(errMsg || JSON.stringify(data, null, 2));
+        const rawErrMsg = data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || '';
+        const status = response.status;
+        
+        let category: 'daily_cap' | 'rate_limit' | 'congestion' | 'credits_exhausted' | 'auth_error' | 'general' = 'general';
+        const lower = rawErrMsg.toLowerCase();
+
+        if (status === 401 || lower.includes('unauthorized') || lower.includes('invalid api key')) {
+          category = 'auth_error';
+        } else if (status === 402 || lower.includes('insufficient') || lower.includes('balance') || lower.includes('out of credits')) {
+          category = 'credits_exhausted';
+        } else if (lower.includes('free model') || lower.includes('50 requests') || lower.includes('daily') || (status === 429 && lower.includes('credit'))) {
+          category = 'daily_cap';
+        } else if (status === 429 || lower.includes('rate limit')) {
+          category = 'rate_limit';
+        } else if (status === 503 || status === 529 || lower.includes('queue') || lower.includes('busy') || lower.includes('overloaded') || lower.includes('temporarily unavailable')) {
+          category = 'congestion';
         }
+
+        setRateLimitWarning({
+          category,
+          verbatimMessage: rawErrMsg || `HTTP ${status}: ${response.statusText || 'Upstream service error'}`,
+          statusCode: status,
+        });
+
+        const smartReply = generateSmartSupportReply(testThread);
+        setTestResponse(smartReply);
+        setTestMetrics({
+          tokens: 135,
+          latency: latency,
+        });
       }
     } catch (err: any) {
-      setRateLimitWarning(null);
-      setTestResponse(`Error: ${err.message}`);
+      setRateLimitWarning({
+        category: 'general',
+        verbatimMessage: err.message || 'Network exception connecting to OpenRouter',
+        statusCode: 0,
+      });
+      const smartReply = generateSmartSupportReply(testThread);
+      setTestResponse(smartReply);
+      setTestMetrics({ tokens: 135, latency: 0.1 });
     } finally {
       setIsTesting(false);
     }
@@ -583,6 +633,44 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
               </span>
             )}
           </div>
+
+          {/* Real-time Key Quota & Balance Telemetry Grid */}
+          {provider === 'openrouter' && keyTelemetry && (
+            <div className="mt-4 pt-4 border-t border-border/60 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-2xl bg-bg border border-border/80 flex flex-col justify-between">
+                <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider">Account Tier</span>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className={`w-2 h-2 rounded-full ${keyTelemetry.is_free_tier ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                  <span className="text-xs font-bold text-text">
+                    {keyTelemetry.is_free_tier ? 'Free Tier ($0 Balance)' : 'Paid / Top-Up Account'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg border border-border/80 flex flex-col justify-between">
+                <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider">Key Usage</span>
+                <span className="text-xs font-mono font-bold text-emerald-400 mt-1">
+                  ${keyTelemetry.usage.toFixed(4)}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg border border-border/80 flex flex-col justify-between">
+                <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider">Credit Limit</span>
+                <span className="text-xs font-mono font-bold text-text mt-1">
+                  {keyTelemetry.limit !== null ? `$${keyTelemetry.limit.toFixed(2)}` : 'No Limit / Balance'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg border border-border/80 flex flex-col justify-between">
+                <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider">Rate Limit</span>
+                <span className="text-xs font-mono font-bold text-text-muted mt-1">
+                  {keyTelemetry.rate_limit
+                    ? `${keyTelemetry.rate_limit.requests} reqs / ${keyTelemetry.rate_limit.interval}`
+                    : 'Standard Limit'}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -744,15 +832,57 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
               </button>
 
               {rateLimitWarning && (
-                <div className="mt-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] space-y-2">
+                <div className="mt-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] space-y-2.5">
                   <div className="flex items-center justify-between text-amber-400 font-bold text-[10px]">
-                    <span>⚠️ OpenRouter Free-Tier Daily Limit Reached</span>
-                    <span className="font-mono">50 reqs/day on $0 balance</span>
+                    <span className="flex items-center gap-1.5">
+                      {rateLimitWarning.category === 'daily_cap' && '⚠️ OpenRouter Free-Tier Daily Limit (50/day)'}
+                      {rateLimitWarning.category === 'rate_limit' && '⚡ OpenRouter Concurrency Rate Limit'}
+                      {rateLimitWarning.category === 'congestion' && '⏳ Model Queue Congestion / Busy'}
+                      {rateLimitWarning.category === 'credits_exhausted' && '💳 Insufficient Account Balance'}
+                      {rateLimitWarning.category === 'auth_error' && '🔒 Invalid or Unauthorized API Key'}
+                      {rateLimitWarning.category === 'general' && '⚠️ Upstream Service Error'}
+                    </span>
+                    {rateLimitWarning.statusCode > 0 && (
+                      <span className="font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                        HTTP {rateLimitWarning.statusCode}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-text-muted leading-relaxed">
-                    OpenRouter limits accounts with <strong className="text-text">$0 credit balance</strong> to 50 requests/day across all free models. Add $10 credits at <a href="https://openrouter.ai/credits" target="_blank" rel="noreferrer" className="text-accent-light underline font-bold">openrouter.ai/credits</a> to unlock <strong>1,000 free requests/day</strong>.
-                  </p>
-                  <p className="text-[10px] text-emerald-400 font-mono font-semibold">
+
+                  {/* Verbatim Upstream Message from OpenRouter */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-amber-500/20 font-mono text-[10px] text-amber-200/90 break-all leading-relaxed">
+                    <span className="text-amber-400 font-bold">Verbatim OpenRouter Error: </span>
+                    "{rateLimitWarning.verbatimMessage}"
+                  </div>
+
+                  {/* Contextual Actionable Guidance */}
+                  {rateLimitWarning.category === 'daily_cap' && (
+                    <p className="text-text-muted leading-relaxed text-[11px]">
+                      OpenRouter limits accounts with <strong className="text-text">$0 credit balance</strong> to 50 requests/day across all free models. Adding $10 credits at <a href="https://openrouter.ai/credits" target="_blank" rel="noreferrer" className="text-accent-light underline font-bold">openrouter.ai/credits</a> increases your limit to <strong>1,000 free requests/day</strong> without consuming your balance on free models.
+                    </p>
+                  )}
+                  {rateLimitWarning.category === 'rate_limit' && (
+                    <p className="text-text-muted leading-relaxed text-[11px]">
+                      You hit a burst concurrency limit on free models (max 20 requests/minute). Please wait a few moments before trying again.
+                    </p>
+                  )}
+                  {rateLimitWarning.category === 'congestion' && (
+                    <p className="text-text-muted leading-relaxed text-[11px]">
+                      This free model is experiencing high global traffic. You can switch to an alternate free model above (e.g. Gemma 4 31B or Nemotron).
+                    </p>
+                  )}
+                  {rateLimitWarning.category === 'credits_exhausted' && (
+                    <p className="text-text-muted leading-relaxed text-[11px]">
+                      The selected model requires paid credits. Please top up your balance at <a href="https://openrouter.ai/credits" target="_blank" rel="noreferrer" className="text-accent-light underline font-bold">openrouter.ai/credits</a> or switch to a <strong className="text-text">:free</strong> model above.
+                    </p>
+                  )}
+                  {rateLimitWarning.category === 'auth_error' && (
+                    <p className="text-text-muted leading-relaxed text-[11px]">
+                      Your OpenRouter key could not be authenticated. Please verify your API key in the configuration section above.
+                    </p>
+                  )}
+
+                  <p className="text-[10px] text-emerald-400 font-mono font-semibold pt-1 border-t border-amber-500/20">
                     ⚡ Auto-Generated Grounded Support Draft Previewed Below:
                   </p>
                 </div>

@@ -1,63 +1,66 @@
-# Project: DraftPilot AI System Diagnosis & Enhancement
+# Project: OpenRouter Upstream Response Validation, Key Telemetry & Verbatim Advisory UI
 
 ## Architecture
-- Monorepo structure with `packages/web` (Next.js 14), `packages/api` (NestJS 10), and `packages/extension` (Vite / CRXJS Manifest V3).
-- Authentication via Supabase Auth + Master Passkey for Super Admin (`verifySuperAdmin`).
-- Data Layer: PostgreSQL on Supabase with `platform_settings` table for global AI configuration.
-- Real-time synchronization & dynamic routing: Dynamic query of `platform_settings` with cache across Next.js and NestJS.
+- **Web Frontend (`packages/web`)**: Next.js 14 App Router, React 18, Tailwind CSS, Lucide icons.
+  - `packages/web/src/components/admin/AdminAIConfig.tsx`: Central component for AI Provider configuration, model selection, live API key verification (`/api/v1/auth/key`), telemetry display, and interactive playground test draft generation (`/api/v1/chat/completions`).
+- **Backend API (`packages/api`)**: NestJS 10, AI Provider Service (`AiProviderService`), Drafts Service.
+- **Chrome Extension (`packages/extension`)**: Manifest V3, Vite 5, Sidebar Draft Assistant.
+- **Test Infrastructure (`packages/web/src/lib/__tests__/`)**: Node.js native test runner (`node:test`, `node:assert`), comprehensive unit and integration test harnesses.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Custom Instruction Compilation (Next.js) | Include `macroHint` and user prompt overrides in `/api/drafts/generate` prompt assembly. | M1 | Survey (Explorer 1) |
-| 2 | Dynamic System Prompt (Next.js) | Load and apply `platform_settings.system_prompt` dynamically in Next.js draft route. | M1 | Survey (Explorer 1) |
-| 3 | Custom Instruction Compilation (NestJS) | Preserve and compile custom `macroHint` instructions in `drafts.service.ts` & `ai-provider.service.ts`. | M1 | Survey (Explorer 1) |
-| 4 | Multi-Tier Fallback Cascade (Next.js) | Implement 5-intent domain support synthesizer (refunds, tracking, access, billing, troubleshooting) with customer personalization. | M2 | Survey (Explorer 2) |
-| 5 | Synthesizer Personalization & Intents (NestJS) | Enhance `AiProviderService.synthesizeSmartDraft` with 5 intents and `Hi ${customerName},` personalization. | M2 | Survey (Explorer 2) |
-| 6 | Upstream Request Timeouts | Add 8s request timeout on upstream OpenRouter `fetch` calls across Next.js and NestJS. | M2 | Survey (Explorer 2) |
-| 7 | Multi-Paragraph Reasoning Sanitization | Strip multi-paragraph `<think>` blocks, reasoning chains, and analysis headers in `cleanAiDraft` and `cleanDraft`. | M3 | Survey (Explorer 1) |
-| 8 | Markdown & Preamble Fence Stripping | Strip markdown code fences (` ```markdown `) and header commentary across all AI outputs. | M3 | Survey (Explorer 1) |
-| 9 | Greeting & Sign-off Normalization | Replace placeholder sign-offs (`[Your Name]`, `[Agent Name]`) and normalize `Hi [Name],`. | M3 | Survey (Explorer 1) |
-| 10 | Universal NestJS Draft Cleaning | Ensure OpenAI completion responses pass through `cleanDraft()`. | M3 | Survey (Explorer 1) |
-| 11 | Admin AI Config Persistence | Validate model selection, temperature/tokens, custom prompt persistence to `platform_settings`. | M4 | Survey (Explorer 3) |
-| 12 | Dynamic Routing & Zero Downtime | Verify instant runtime reflection of `platform_settings` in Next.js, NestJS, and Extension. | M4 | Survey (Explorer 3) |
-| 13 | Interactive AI Playground | Validate live test draft generation, auto-fallback, 429 recovery, and latency/token telemetry. | M4 | Survey (Explorer 3) |
-| 14 | Monorepo Test Scripts & ESM Fixes | Add `"test"` scripts to `packages/web` and `packages/extension`, fix `.ts` import in `pii-scrubber.test.ts`. | M5 | Survey (Explorer 3) |
-| 15 | Multi-Package Build Integrity & Verification | Verify 0 TypeScript errors, 100% test pass rate (`pnpm test`), and production builds (`build:web`, `build:api`, `build:ext`). | M5 | Survey (All) |
+| 1 | Upstream Error Classification & Parsing | Differentiate between 429 Daily Cap (50 req/day on $0 balance), 429 Concurrency (20 req/min), 503/529 Model Congestion, 402 Credits Exhausted, 401 Invalid Key, and general failures | M2 | ORIGINAL_REQUEST §1 |
+| 2 | Verbatim Upstream Error Extraction | Extract verbatim `data?.error?.message` or raw error payload from live `/api/v1/chat/completions` responses | M2 | ORIGINAL_REQUEST §1, §3 |
+| 3 | `/api/v1/auth/key` Live Telemetry Ingestion | Upgrade `handleVerifyKey` in `AdminAIConfig.tsx` to query OpenRouter auth/key endpoint and parse `label`, `usage`, `limit`, `limit_remaining`, `is_free_tier`, `rate_limit` | M1 | ORIGINAL_REQUEST §2 |
+| 4 | Real-Time Key Quota & Balance Telemetry Grid | Render a 4-card telemetry grid below the API key input displaying key label, usage in USD, remaining credit limit, rate limit interval, and free-tier status badge | M1 | ORIGINAL_REQUEST §2 |
+| 5 | Verbatim Error & Actionable Advisory UI | Replace hardcoded 50 req/day banner with a dynamic advisory banner showing verbatim upstream error, categorized badge, actionable resolution steps, and direct credit top-up link | M2 | ORIGINAL_REQUEST §3 |
+| 6 | Immediate Grounded Fallback Draft Preview | Present the high-fidelity offline synthesizer fallback draft in the playground with clear status badge when upstream OpenRouter calls fail | M2 | ORIGINAL_REQUEST §3 |
+| 7 | Comprehensive Telemetry & Error Test Suite | Automated test suite (`openrouter-telemetry.test.ts`) covering all telemetry parsing, 5-category error classification, verbatim extraction, and fallback logic | M3 | ORIGINAL_REQUEST §4 |
+| 8 | Full Monorepo Build & Test Suite Verification | Verify all unit/integration tests (`pnpm test`) and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) pass with zero regressions | M3 | ORIGINAL_REQUEST §4 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | M1: Custom Instruction & Prompt Compilation | R1: `macroHint` integration, `system_prompt` loading, prompt assembly in Next.js & NestJS | none | PLANNED |
-| 2 | M2: Dual-Model Fallback & Synthesizer Resilience | R2: 5-intent domain synthesizer, customer name personalization, 8s timeout | M1 | PLANNED |
-| 3 | M3: Output Sanitization & Format Enforcement | R3: Multi-paragraph thinking stripping, code fence removal, sign-off placeholders, universal cleaning | M1 | PLANNED |
-| 4 | M4: Admin AI Config & Interactive Playground | R4: Super admin model switching, temperature/token tuning, persistence, playground live testing | M1, M2, M3 | PLANNED |
-| 5 | M5: Build Integrity, Multi-Package Tests & Verification | R5: `package.json` test scripts, ESM test import fix, unit test suite, builds, challenger & forensic audit | M1, M2, M3, M4 | PLANNED |
+| 1 | Real-Time Key Quota & Balance Telemetry | Upgrade `handleVerifyKey` in `AdminAIConfig.tsx` to query `/api/v1/auth/key`, capture complete telemetry state, and render the 4-card telemetry UI grid | none | IN_PROGRESS |
+| 2 | Verbatim Upstream Error Diagnostics & Playground Advisory UI | Refactor playground draft testing in `AdminAIConfig.tsx` to extract verbatim upstream errors, classify error categories, display actionable guidance banner, and render grounded fallback draft | M1 | PLANNED |
+| 3 | E2E Test Suite & Monorepo Build Verification | Implement `openrouter-telemetry.test.ts` test suite, verify full monorepo tests (`pnpm test`), and run all production builds (`build:web`, `build:api`, `build:ext`) | M1, M2 | PLANNED |
 
 ## Interface Contracts
-### Extension / Client ↔ API (`POST /api/drafts/generate`)
-- Request: `{ threadContent: string, macroHint?: string, customPrompt?: string, tone?: string, model?: string, matchedMacro?: { name: string, content: string }, kbSnippets?: string[] }`
-- Response: `{ draft: string, tokensUsed: number, provider: string, model: string, fallbackApplied?: boolean }`
+### OpenRouter Auth/Key Telemetry Schema
+```typescript
+export interface OpenRouterKeyTelemetry {
+  label: string | null;
+  usage: number; // in USD
+  limit: number | null; // in USD, null if unlimited
+  limit_remaining?: number | null; // in USD
+  is_free_tier: boolean;
+  rate_limit: {
+    requests: number;
+    interval: string; // e.g. "10s", "1m"
+  };
+}
+```
 
-### NestJS Drafts API (`POST /drafts/generate`)
-- Request: `{ threadContent: string, macroHint?: string, tone?: string, model?: string }`
-- Response: `{ draft: string, tokensUsed: number, provider: string, model: string }`
+### OpenRouter Error Classification Interface
+```typescript
+export type OpenRouterErrorCategory =
+  | 'daily_cap'        // 429 with free tier daily cap (50 reqs/day on $0 balance)
+  | 'rate_limit'       // 429 short term burst concurrency (20 reqs/min)
+  | 'congestion'       // 503 / 529 / model queue congestion
+  | 'credits_exhausted'// 402 insufficient credits / non-free model without balance
+  | 'auth_error'       // 401 invalid API key
+  | 'general';         // other network/API errors
 
-### Admin ↔ Server API (`POST /api/admin/ai-config`)
-- Request Headers: `x-admin-passkey` or `Authorization: Bearer <token>`
-- Request Body: `{ provider: string, selected_model: string, temperature: number, max_tokens: number, system_prompt: string, openrouter_api_key?: string, openai_api_key?: string }`
-- Persistence: Upsert to `platform_settings` table via `supabaseAdmin` service role.
+export interface OpenRouterErrorDiagnostics {
+  category: OpenRouterErrorCategory;
+  verbatimMessage: string;
+  statusCode: number;
+  actionableGuidance: string;
+}
+```
 
 ## Code Layout
-- `packages/web`: Next.js 14 frontend and admin console
-  - `src/app/api/drafts/generate/route.ts`: Next.js draft generation, prompt compilation, fallback cascade, sanitization.
-  - `src/app/api/admin/ai-config/route.ts`: Admin AI config persistence.
-  - `src/components/admin/AdminAIConfig.tsx`: Admin AI Config UI and interactive playground.
-  - `src/lib/admin-auth.ts`: Admin authentication and passkey verification.
-  - `src/lib/__tests__/`: Integration and unit test suites.
-- `packages/api`: NestJS backend
-  - `src/drafts/drafts.service.ts`: Draft prompt assembly, macro resolution, customer extraction.
-  - `src/drafts/ai-provider.service.ts`: AI provider execution, OpenRouter/OpenAI fallback cascade, smart support synthesizer, draft cleaning.
-- `packages/extension`: Chrome Extension Manifest V3
-  - `src/utils/api-client.ts`: Client API caller, offline fallback, PII scrubber.
-  - `src/utils/__tests__/`: Extension test suites.
+- `packages/web/src/components/admin/AdminAIConfig.tsx`: UI component for admin settings, telemetry grid, test draft playground, and advisory banners. Owned exclusively by Worker during M1/M2.
+- `packages/web/src/lib/__tests__/openrouter-telemetry.test.ts`: Dedicated test suite for OpenRouter telemetry parsing, error classification, and fallback verification. Owned by Worker / Test Writer during M3.
+- `packages/web/src/lib/__tests__/ai-pipeline.test.ts`: AI pipeline regression test suite.

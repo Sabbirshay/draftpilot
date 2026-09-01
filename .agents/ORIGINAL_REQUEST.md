@@ -1,42 +1,35 @@
 # Original User Request
 
-## 2026-08-31T17:18:27Z
+## 2026-09-01T05:50:29Z
 
-<USER_REQUEST>
-Perform a comprehensive diagnosis and enhancement of the DraftPilot AI system across the Next.js API (`/api/drafts/generate`), NestJS AI backend (`AiProviderService`), Super Admin AI configuration (`AdminAIConfig`), and Chrome Extension client to ensure contextual instructions, model fallback cascades, prompt assembly, output sanitization, and live playground testing operate flawlessly without regressions.
+Validate why OpenRouter rate-limit / daily limit alerts are triggered, verify the live upstream OpenRouter API responses (`/api/v1/chat/completions`), enhance the Admin AI Config key verification to query `/api/v1/auth/key` for real-time balance and usage statistics, and ensure transparent upstream error reporting in the admin playground.
 
 Working directory: /home/md-roni-ahamed/Test project
 Integrity mode: development
 
 ## Requirements
 
-### R1. Custom Instruction & Contextual Prompt Compilation
-Audit and verify that custom AI instructions (`macroHint` / user prompt overrides) and matched macros / knowledge chunks are properly compiled into the final LLM prompt context across both Next.js (`/api/drafts/generate`) and NestJS (`AiProviderService`) AI pipelines, ensuring user guidance directly shapes the output.
+### R1. Live OpenRouter Upstream Response Validation & Diagnosis
+Audit the exact upstream HTTP response returned by OpenRouter during live test draft generations. Differentiate between:
+1. Free-tier daily account caps (50 requests/day on $0 balance)
+2. Per-minute concurrency limits (20 requests/minute)
+3. Model-specific queue congestion (busy free models)
+4. Invalid or unauthenticated keys
 
-### R2. Dual-Model Fallback & Smart Support Synthesizer Resilience
-Verify and harden the multi-tier fallback cascade (primary model -> secondary fallback -> local domain-aware smart support synthesizer) so draft generation gracefully recovers during OpenRouter upstream rate limits (429), timeouts, network drops, or missing credentials.
+### R2. Real-Time Key Quota & Balance Telemetry
+Upgrade the `handleVerifyKey` method in `AdminAIConfig.tsx` to query `https://openrouter.ai/api/v1/auth/key` and display live account telemetry (key label, usage amount, remaining credit limit, rate limit interval, and free-tier status).
 
-### R3. Output Sanitization & Format Enforcement
-Ensure all AI outputs are strictly sanitized to remove reasoning artifacts (such as `<think>` blocks, reasoning chains, analysis headers, and markdown code fences) and normalize customer greetings (`Hi [Name],`) and professional sign-offs.
+### R3. Verbatim Error & Advisory UI
+Update the playground rate-limit banner in `AdminAIConfig.tsx` to show the verbatim upstream error message from OpenRouter, along with actionable instructions to resolve it (e.g. adding credits or switching free models) and immediate fallback preview.
 
-### R4. Super Admin AI Playground & Dynamic Routing
-Validate the Super Admin AI Configuration suite (`/admin` -> AI Config) for live model switching, temperature/token tuning, custom system prompt persistence, and interactive playground draft testing.
-
-### R5. Non-Destructive Integrity & Build Verification
-Preserve all existing functionality and ensure complete test suites (`pnpm -r test`) and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) compile cleanly with zero errors.
+### R4. Build & Test Verification
+Run full monorepo test suites (`pnpm test`) and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) to guarantee zero regressions.
 
 ## Acceptance Criteria
 
-### Prompt Compilation & Quality
-- [ ] Passing custom instructions (e.g. "Apologize and offer discount") visibly shapes the generated reply.
-- [ ] Output is clean plain text ready for email insertion, with no leftover reasoning tokens or markdown wrapper blocks.
+### Diagnostics & UI Telemetry
+- [ ] Admin AI Config displays live key usage, credit limits, and rate limits directly from OpenRouter when clicking "Verify Key".
+- [ ] The playground banner shows the verbatim upstream error from OpenRouter and clearly explains the exact reason (daily limit vs concurrency vs congestion).
 
-### Fallback Reliability
-- [ ] When upstream providers return errors or rate limits, the system seamlessly transitions to fallback models or the domain synthesizer without crashing or stalling.
-- [ ] Offline / mock testing produces contextually relevant replies for customer support intents (refunds, tracking, billing, access).
-
-### Admin Controls & Build Health
-- [ ] Admin AI configuration updates persist to `platform_settings` and take effect immediately on draft generation requests.
+### Build Verification
 - [ ] `pnpm test`, `pnpm build:web`, `pnpm build:api`, and `pnpm build:ext` all succeed with zero errors.
-
-</USER_REQUEST>
