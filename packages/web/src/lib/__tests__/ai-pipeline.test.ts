@@ -571,4 +571,36 @@ describe('Requirement R4: Super Admin AI Configuration Persistence & Security', 
     assert.strictEqual(payload.system_prompt, 'Custom VIP support directives');
     assert.ok(payload.updated_at);
   });
+
+  test('validates platform_settings persistence payload for z-ai/glm-5.2:free model', () => {
+    const createSettingsPayload = (overrides: Record<string, any> = {}) => {
+      const activeModel = overrides.custom_model || overrides.selected_model || 'z-ai/glm-5.2:free';
+      return {
+        id: crypto.randomUUID(),
+        ai_provider: overrides.ai_provider || 'openrouter',
+        openrouter_api_key: overrides.openrouter_api_key || 'sk-or-v1-testkey123',
+        openrouter_model: activeModel,
+        selected_model: activeModel,
+        openai_api_key: overrides.openai_api_key || '',
+        system_prompt: overrides.system_prompt || 'Default system prompt',
+        temperature: overrides.temperature !== undefined ? Number(overrides.temperature) : 0.4,
+        max_tokens: overrides.max_tokens !== undefined ? Number(overrides.max_tokens) : 300,
+        updated_at: new Date().toISOString(),
+      };
+    };
+
+    const payload = createSettingsPayload({
+      selected_model: 'z-ai/glm-5.2:free',
+      temperature: 0.4,
+      max_tokens: 300,
+      system_prompt: 'DraftPilot support assistant prompt',
+    });
+
+    assert.strictEqual(payload.ai_provider, 'openrouter');
+    assert.strictEqual(payload.openrouter_model, 'z-ai/glm-5.2:free');
+    assert.strictEqual(payload.selected_model, 'z-ai/glm-5.2:free');
+    assert.strictEqual(payload.temperature, 0.4);
+    assert.strictEqual(payload.max_tokens, 300);
+    assert.ok(payload.updated_at);
+  });
 });
