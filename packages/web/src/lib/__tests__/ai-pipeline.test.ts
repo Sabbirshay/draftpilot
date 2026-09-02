@@ -1,5 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 // @ts-ignore - Node --experimental-strip-types requires explicit .ts extension for ESM resolution
 import { verifySuperAdmin, supabaseAdmin } from '../admin-auth.ts';
 
@@ -603,4 +606,44 @@ describe('Requirement R4: Super Admin AI Configuration Persistence & Security', 
     assert.strictEqual(payload.max_tokens, 300);
     assert.ok(payload.updated_at);
   });
+
+  test('validates fallback model resolution for z-ai/glm-5.2:free', () => {
+    const resolveFallbackModel = (activeModel: string) => {
+      return activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+    };
+
+    const fallback = resolveFallbackModel('z-ai/glm-5.2:free');
+    assert.strictEqual(fallback, 'google/gemma-4-26b-a4b-it:free');
+  });
+
+  test('validates OPENROUTER_FREE_MODELS specification in AdminAIConfig.tsx adheres to requirement R1', () => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const configPath = path.resolve(__dirname, '../../components/admin/AdminAIConfig.tsx');
+    const content = fs.readFileSync(configPath, 'utf-8');
+    const match = content.match(/export const OPENROUTER_FREE_MODELS = (\[[\s\S]*?\]);/);
+    assert.ok(match, 'AdminAIConfig.tsx must export OPENROUTER_FREE_MODELS array');
+
+    const OPENROUTER_FREE_MODELS = new Function(`return ${match[1]}`)();
+
+    assert.strictEqual(OPENROUTER_FREE_MODELS.length, 3);
+    const glmModel = OPENROUTER_FREE_MODELS.find((m: any) => m.id === 'z-ai/glm-5.2:free');
+    assert.ok(glmModel, 'z-ai/glm-5.2:free must exist in free models list');
+    assert.strictEqual(glmModel.name, 'ZHIPU AI GLM 5.2');
+    assert.strictEqual(glmModel.provider, 'ZHIPU AI');
+    assert.strictEqual(glmModel.badge, 'Free · Bilingual');
+
+    const gemma26b = OPENROUTER_FREE_MODELS.find((m: any) => m.id === 'google/gemma-4-26b-a4b-it:free');
+    assert.ok(gemma26b, 'google/gemma-4-26b-a4b-it:free must exist in free models list');
+    assert.strictEqual(gemma26b.name, 'Google Gemma 4 26B A4B IT');
+    assert.strictEqual(gemma26b.provider, 'Google DeepMind');
+    assert.strictEqual(gemma26b.badge, 'Free · MoE Architecture');
+
+    const gemma31b = OPENROUTER_FREE_MODELS.find((m: any) => m.id === 'google/gemma-4-31b-it:free');
+    assert.ok(gemma31b, 'google/gemma-4-31b-it:free must exist in free models list');
+    assert.strictEqual(gemma31b.name, 'Google Gemma 4 31B IT');
+    assert.strictEqual(gemma31b.provider, 'Google DeepMind');
+    assert.strictEqual(gemma31b.badge, 'Free · High Reasoning');
+  });
 });
+

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "AI-powered support reply co-pilot — Chrome extension for small support teams",
-  "packageManager": "pnpm@9.1.0",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "dev": "pnpm --filter @draftpilot/web dev",
     "build": "pnpm --filter @draftpilot/web build",

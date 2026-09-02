@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
-const OPENROUTER_FREE_MODELS = [
+export const OPENROUTER_FREE_MODELS = [
   { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B A4B IT', provider: 'Google DeepMind', badge: 'Free · MoE Architecture' },
   { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B IT', provider: 'Google DeepMind', badge: 'Free · High Reasoning' },
   { id: 'z-ai/glm-5.2:free', name: 'ZHIPU AI GLM 5.2', provider: 'ZHIPU AI', badge: 'Free · Bilingual' },
