@@ -1,14 +1,16 @@
-# Progress - Worker M2
+# Progress — Milestone 2: Root Passkey Vault & Dynamic Platform Settings
 
-Last visited: 2026-08-31T16:47:23Z
+Last visited: 2026-09-02T21:13:40Z
 
 ## Status
 - [x] Initialized DISPATCH.md and BRIEFING.md
-- [x] Read ORIGINAL_REQUEST.md, PROJECT.md, and explorer analysis
-- [x] Inspect the 4 target files
-- [x] Implement fixes in AdminGuard.tsx, admin-auth.ts, AdminAIConfig.tsx, admin-auth.test.ts
-- [x] Run type checks (`tsc --noEmit -p packages/web/tsconfig.json` -> PASSED 0 errors)
-- [x] Run unit tests (`node --experimental-strip-types --test packages/web/src/lib/__tests__/admin-auth.test.ts` -> PASSED 8/8)
-- [x] Run Next.js production build (`next build` in packages/web -> PASSED 10/10 routes)
-- [x] Write changes.md and handoff.md
-- [x] Send completion message
+- [x] Read mandatory context files (`ORIGINAL_REQUEST.md`, `PROJECT.md`, explorer handoff)
+- [x] Inspect existing codebase for `platform_settings`, `admin-auth.ts`, `AdminOverview.tsx`, etc.
+- [x] Implement `packages/api/supabase/migrations/008_platform_settings_root_passkey.sql`
+- [x] Implement `packages/web/src/lib/admin-auth.ts`
+- [x] Implement `packages/web/src/app/api/admin/passkey/route.ts`
+- [x] Implement `packages/web/src/components/admin/AdminPasskeyVault.tsx`
+- [x] Update `packages/web/src/components/admin/AdminOverview.tsx`
+- [x] Implement `packages/web/src/lib/__tests__/admin-passkey-vault.test.ts`
+- [x] Run test and build commands (`pnpm test`, `pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) — All passed with 0 errors!
+- [x] Write `handoff.md` and send completion message

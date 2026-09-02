@@ -28,12 +28,16 @@ export default function DashboardPage() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [skipOnboarding, setSkipOnboarding] = useState(false);
 
-  // Auth redirect if unauthenticated
+  // Auth redirect if unauthenticated or unverified
   useEffect(() => {
-    if (!isLoading && !session) {
-      window.location.href = '/login';
+    if (!isLoading) {
+      if (!session) {
+        window.location.href = '/login';
+      } else if (user && user.email_confirmed_at === null) {
+        window.location.href = '/login?unverified=true';
+      }
     }
-  }, [isLoading, session]);
+  }, [isLoading, session, user]);
 
   // Determine if we should show onboarding (shown for new users until Gmail is connected or they choose to explore)
   useEffect(() => {
@@ -68,8 +72,8 @@ export default function DashboardPage() {
     );
   }
 
-  // No session — will redirect to login
-  if (!session) {
+  // No session or unverified email — will redirect to login
+  if (!session || (user && user.email_confirmed_at === null)) {
     return null;
   }
 

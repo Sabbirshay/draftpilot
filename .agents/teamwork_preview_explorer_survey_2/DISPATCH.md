@@ -1,21 +1,17 @@
-## 2026-09-01T05:51:35Z
-You are Explorer 2 for the initial survey phase.
-Your working directory is: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_2
-Project root: /home/md-roni-ahamed/Test project
-Original Request: /home/md-roni-ahamed/Test project/ORIGINAL_REQUEST.md
+## 2026-09-02T21:02:28Z
 
-You MUST read /home/md-roni-ahamed/Test project/ORIGINAL_REQUEST.md first.
+<USER_REQUEST>
+You are a teamwork_preview_explorer investigating Requirement 2 (Root Passkey Viewer & Dynamic Updater).
+Your working directory is: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_2
+The workspace root is: /home/md-roni-ahamed/Test project
+MANDATORY: Read the user request at /home/md-roni-ahamed/Test project/.agents/ORIGINAL_REQUEST.md before doing anything else.
 
 Task:
-Map AdminAIConfig.tsx, handleVerifyKey, key management UI, key verification logic, where https://openrouter.ai/api/v1/auth/key needs to be called, how quota and balance telemetry (key label, usage amount, remaining credit limit, rate limit interval, free-tier status) should be formatted and rendered, and how the playground rate-limit banner currently behaves vs how it should display verbatim upstream error messages, actionable resolution guidance, and fallback preview.
-
-Investigate:
-1. Exact location and implementation of AdminAIConfig.tsx and handleVerifyKey.
-2. What state management is used for API keys, verification status, quota, balance, and rate limit errors.
-3. OpenRouter's /api/v1/auth/key endpoint response schema (e.g. data: { label, usage, limit, is_free_tier, rate_limit: { requests, interval } }).
-4. The playground UI, rate limit banners, error banners, and fallback preview components.
-
-Write your findings and evidence chain in:
-/home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_2/handoff.md
-
-When finished, send a brief completion message to your parent.
+1. Map how root passkey authentication is currently implemented across web, api, and packages.
+2. Map how admin sessions are validated and where platform_settings table/store exists or needs to be added.
+3. Determine how server API routes check the passkey and how to make passkey updates persist dynamically in platform_settings without server restarts.
+4. Investigate the Super Admin UI components/pages, and design the "Root Passkey Vault" card with Show/Hide toggle and update functionality.
+5. Enumerate all required changes, files to touch, database schemas needed (platform_settings table), and interface contracts.
+6. Write a comprehensive, self-contained handoff report to: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_2/handoff.md
+7. Update your progress.md regularly with timestamps. Send a completion message when done.
+</USER_REQUEST>

@@ -1,180 +1,222 @@
-# Survey Report: Monorepo Architecture, Test Infrastructure, Production Builds & OpenRouter Mock Harnesses
+# Investigation Handoff: Requirement 3 (Mandatory Email Verification) & Requirement 4 (Monorepo Build & Test Architecture)
 
 ## 1. Observation
 
-Direct observations from codebase inspection, environment verification, test execution, and production build checks:
-
-### A. Monorepo Structure, Package Manager & Workspace Configuration
+### 1.1 Monorepo Layout & Package Architecture
 - **Root Configuration**:
-  - `package.json` (`/home/md-roni-ahamed/Test project/package.json`):
-    - Declares `packageManager`: `"pnpm@9.1.0"`.
-    - Declares root scripts:
-      - `"dev"`: `"pnpm --filter @draftpilot/web dev"`
-      - `"dev:api"`: `"pnpm --filter @draftpilot/api dev"`
-      - `"dev:web"`: `"pnpm --filter @draftpilot/web dev"`
-      - `"dev:ext"`: `"pnpm --filter @draftpilot/extension dev"`
-      - `"build"`: `"pnpm --filter @draftpilot/web build"`
-      - `"build:api"`: `"pnpm --filter @draftpilot/api build"`
-      - `"build:web"`: `"pnpm --filter @draftpilot/web build"`
-      - `"build:ext"`: `"pnpm --filter @draftpilot/extension build"`
-      - `"test"`: `"pnpm -r test"`
-      - `"lint"`: `"pnpm -r lint"`
-  - `pnpm-workspace.yaml` (`/home/md-roni-ahamed/Test project/pnpm-workspace.yaml`):
-    - Configured with `packages: - "packages/*"`.
-  - **Toolchain Environment**:
-    - Binaries located at `/home/md-roni-ahamed/Test project/.tools/node/bin`:
-      - Node.js: `v22.7.0`
-      - pnpm: `10.34.5`
-    - Setting `export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"` and `export HOME="/home/md-roni-ahamed/Test project/.tmp_home"` provides clean execution across all workspace tools.
+  - `pnpm-workspace.yaml`:
+    ```yaml
+    packages:
+      - "packages/*"
+    ```
+  - Root `package.json` (`/home/md-roni-ahamed/Test project/package.json`):
+    - `dev`: `pnpm --filter @draftpilot/web dev`
+    - `build`: `pnpm --filter @draftpilot/web build`
+    - `build:api`: `pnpm --filter @draftpilot/api build`
+    - `build:web`: `pnpm --filter @draftpilot/web build`
+    - `build:ext`: `pnpm --filter @draftpilot/extension build`
+    - `test`: `pnpm -r test`
+    - `lint`: `pnpm -r lint`
+- **Package Inventory**:
+  1. **Web Application (`@draftpilot/web` at `packages/web`)**:
+     - **Stack**: Next.js 14.2.35 (App Router), React 18.2.0, Tailwind CSS, Framer Motion (`framer-motion` ^11.0.0, `motion` ^13.1.1), `@supabase/supabase-js` (^2.38.0).
+     - **Build Script**: `next build` (triggered via `pnpm build:web`).
+     - **Test Script**: `node --experimental-strip-types --test src/lib/__tests__/*.test.ts` using Node 22 native test runner (`node:test`, `node:assert`).
+     - **Active Tests**: 10 test suites in `packages/web/src/lib/__tests__/` (112 test cases currently passing).
+  2. **Backend API (`@draftpilot/api` at `packages/api`)**:
+     - **Stack**: NestJS 10.0.0, Express platform, `@supabase/supabase-js` (^2.38.0), Stripe (^14.0.0), Swagger, Throttler.
+     - **Build Script**: `nest build` (triggered via `pnpm build:api`).
+     - **Test Script**: `jest --passWithNoTests` using Jest 29.5.0 + `ts-jest` (13 tests across 2 suites currently passing).
+  3. **Chrome Extension (`@draftpilot/extension` at `packages/extension`)**:
+     - **Stack**: Manifest V3, Vite 5.0.0, TypeScript 5.0.0, Content Scripts & Background Service Worker.
+     - **Build Script**: `vite build && cp manifest.json dist/ && cp -r icons dist/` (triggered via `pnpm build:ext`).
+     - **Test Script**: `node --experimental-strip-types --test src/utils/__tests__/*.test.ts` using Node 22 native test runner (9 tests passing).
 
-### B. Workspace Packages & Dependencies
-1. **`packages/web` (`@draftpilot/web` v0.1.0)**:
-   - Path: `/home/md-roni-ahamed/Test project/packages/web`
-   - Framework: Next.js 14.2.35 (App Router), React 18.2.0, Tailwind CSS 3.3.0, Framer Motion 11.0.0, `@supabase/supabase-js` 2.38.0.
-   - Scripts:
-     - `"dev"`: `"next dev --port 3000"`
-     - `"build"`: `"next build"`
-     - `"test"`: `"node --experimental-strip-types --test src/lib/__tests__/*.test.ts"`
-     - `"lint"`: `"echo 'Web package lint verified'"`
-2. **`packages/api` (`@draftpilot/api` v1.0.0)**:
-   - Path: `/home/md-roni-ahamed/Test project/packages/api`
-   - Framework: NestJS 10.0.0 (`@nestjs/core`, `@nestjs/platform-express`, `@nestjs/throttler`, `@nestjs/swagger`), OpenAI SDK 4.0.0, `@supabase/supabase-js` 2.38.0, Stripe 14.0.0.
-   - Scripts:
-     - `"dev"`: `"nest start --watch"`
-     - `"build"`: `"nest build"`
-     - `"test"`: `"jest --passWithNoTests"`
-3. **`packages/extension` (`@draftpilot/extension` v0.1.0)**:
-   - Path: `/home/md-roni-ahamed/Test project/packages/extension`
-   - Framework: Chrome Extension Manifest V3, Vite 5.4.21, TypeScript 5.0.0, `@types/chrome` 0.0.254.
-   - Scripts:
-     - `"dev"`: `"vite build --watch --mode development"`
-     - `"build"`: `"vite build && cp manifest.json dist/ && cp -r icons dist/"`
-     - `"test"`: `"node --experimental-strip-types --test src/utils/__tests__/*.test.ts"`
-     - `"lint"`: `"echo 'Extension package lint verified'"`
+### 1.2 Monorepo Build & Test Command Execution Evidence
+- Executed `pnpm test` with tool environment:
+  - Command: `export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH" && export HOME="/home/md-roni-ahamed/Test project/.tmp_home" && pnpm test`
+  - Result: **Exit Code 0** (Web: 112 passed, API: 13 passed, Extension: 9 passed, Total: 134 passed).
+- Executed `pnpm build:web`:
+  - Result: **Exit Code 0** (Compiled successfully, static pages generated).
+- Executed `pnpm build:api`:
+  - Result: **Exit Code 0** (Nest build successful).
+- Executed `pnpm build:ext`:
+  - Result: **Exit Code 0** (Vite build successful, bundle generated into `dist/`).
 
-### C. Test Suites & Test Infrastructure
-- Running `pnpm test` executes all packages concurrently:
-  - **`packages/web`** (64 passing tests across 12 suites in 347ms):
-    1. `src/lib/__tests__/admin-auth.test.ts` (8 tests, 98 lines):
-       - Tests `verifySuperAdmin` guard against missing headers, non-Bearer auth, empty tokens, expired tokens.
-       - Tests `x-admin-passkey` direct header authorization (`draftpilot-root-2026`, `admin2026`).
-       - Tests Supabase admin client initialization.
-    2. `src/lib/__tests__/admin-m3.test.ts` (3 tests, 60 lines):
-       - Tests feature flag toggles, global macro creation/tag parsing, bento quota calculations.
-    3. `src/lib/__tests__/ai-core-enhancements.test.ts` (15 tests, 334 lines):
-       - Tests `macroHint` integration in prompt compilation under `### Agent Guidance / Custom Instruction:`.
-       - Tests dynamic `system_prompt` loading.
-       - Tests 5-intent domain synthesizer (Refunds, Tracking, Account Access, Billing, Troubleshooting) with customer name personalization.
-       - Tests `cleanAiDraft` (stripping `<think>` blocks, reasoning chains, code fences, sign-off placeholders `[Your Name]`, greetings).
-    4. `src/lib/__tests__/ai-pipeline.test.ts` (14 tests, 569 lines):
-       - Tests full pipeline `compileAIPromptContext`, `synthesizeDomainSupportDraft`, `sanitizeUniversalAiDraft`.
-       - Tests simulated 429 rate limit cascade to domain synthesizer fallback.
-       - Tests admin API auth and `platform_settings` persistence payload schema.
-    5. `src/lib/__tests__/challenger-interactive.test.ts` (24 tests, 500 lines):
-       - Tests edge cases in `cleanAiDraft`, `extractSenderName` (RFC 5322 headers, sign-offs, blacklist).
-       - Tests `SlidingWindowRateLimiter` (20 req/60s).
-       - Tests passkey validation and session storage preservation.
-       - Tests global macro broadcast distribution and multi-tenant RLS boundaries.
-  - **`packages/extension`** (7 passing tests in 1 suite in 187ms):
-    1. `src/utils/__tests__/pii-scrubber.test.ts` (7 tests, 56 lines):
-       - Tests redaction of emails (`[EMAIL_REDACTED]`), credit cards (`[CARD_REDACTED]`), SSNs (`[SSN_REDACTED]`), domestic & international phone numbers (`[PHONE_REDACTED]`), addresses & PO boxes (`[ADDRESS_REDACTED]`), tokens/passwords (`[TOKEN_REDACTED]`, `[SECRET_REDACTED]`), and preservation of clean support inquiries.
-  - **`packages/api`** (`jest --passWithNoTests`):
-    - Configured with Jest / ts-jest, passes with code 0.
-  - **Total Monorepo Tests**: 71 tests passing with 0 failures, 0 skips, 0 errors.
+### 1.3 Registration, Login, and Email Verification Code Inspection
+- **Registration & Login Pages**:
+  - `packages/web/src/app/join/page.tsx`: Renders `<AuthForm initialMode="signup" />`.
+  - `packages/web/src/app/login/page.tsx`: Renders `<AuthForm initialMode="signin" />`.
+- **Current `AuthForm.tsx` Logic (`packages/web/src/components/AuthForm.tsx`)**:
+  - **Signup (`mode === 'signup'`)** lines 93–122:
+    ```typescript
+    const { data: signUpData, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: teamName ? teamName.split("'")[0] : email.split('@')[0],
+          team_name: teamName || `${email.split('@')[0]}'s Team`,
+        },
+        emailRedirectTo: typeof window !== 'undefined'
+          ? `${window.location.origin}/auth/callback`
+          : undefined,
+      },
+    });
 
-### D. Production Build Status
-1. **`pnpm build:ext`**:
-   - Executes Vite 5.4.21 build and copies `manifest.json` and `icons/` to `dist/`.
-   - Output: `dist/src/sidepanel/index.html`, `dist/assets/sidepanel.css`, `dist/service-worker.js`, `dist/gmail-detector.js`, `dist/sidepanel.js`.
-   - Result: Exit code 0, completed in 159ms.
-2. **`pnpm build:api`**:
-   - Executes `nest build` using `@nestjs/cli` and `typescript`.
-   - Output: `packages/api/dist/`.
-   - Result: Exit code 0, completed in ~3s.
-3. **`pnpm build:web`**:
-   - Executes `next build` on Next.js 14.2.35.
-   - Output: 10 static and dynamic routes compiled and optimized (`/`, `/_not-found`, `/admin`, `/admin/login`, `/auth/callback`, `/dashboard`, `/join`, `/login`, and 7 API routes).
-   - Result: Exit code 0 with `VERCEL=1`.
+    if (error) throw error;
 
-### E. Existing OpenRouter Client Implementation & Mock Fixtures
-- **Current Client Implementations**:
-  - `AdminAIConfig.tsx` (lines 187–245): `handleVerifyKey` fetches `https://openrouter.ai/api/v1/auth/key` with `Authorization: Bearer <key>`. Currently only parses `json.data.label`, discarding `usage`, `limit`, `is_free_tier`, and `rate_limit`.
-  - `AdminAIConfig.tsx` (lines 337–474): `handleTestDraft` calls `https://openrouter.ai/api/v1/chat/completions`. On error/429, displays a static hardcoded warning without verbatim upstream error text or category differentiation.
-  - `packages/web/src/app/api/drafts/generate/route.ts` (lines 278–345) & `packages/api/src/drafts/ai-provider.service.ts` (lines 83–148): Server-side OpenRouter caller with dual-model fallback and 8s timeout.
-- **Existing Mock Fixtures & Test Harnesses**:
-  - In `ai-pipeline.test.ts` (lines 380–414): `simulateModelCascade` tests fallback from 429 errors.
-  - In `challenger-interactive.test.ts` (lines 100–124): `SlidingWindowRateLimiter` test harness.
-  - **Gap Identified**: No dedicated unit test suite currently verifies the `/api/v1/auth/key` telemetry payload parsing and formatting, nor does one test the error categorization and verbatim message extraction for all OpenRouter error types (daily cap vs concurrency limit vs model congestion vs invalid key).
+    if (signUpData.session) {
+      // Instant session available — auto redirect to onboarding dashboard
+      setSuccessMessage('Account created! Setting up your dashboard...');
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.href = '/dashboard';
+        }
+      }, 800);
+    } else {
+      // Email confirmation is required by Supabase
+      setSuccessMessage('Account created! If email confirmation is enabled in your Supabase project, please check your inbox (and spam) to confirm your email before signing in.');
+    }
+    ```
+    *Observation*: If Supabase returns a session or auto-confirms in dev, it currently redirects to `/dashboard`. When email confirmation is enabled or required, `signUpData.session` is null, and the message does not match the exact banner requirement: `"Check your inbox! Please verify your email before logging in."`.
+  - **Sign In (`mode === 'signin'`)** lines 124–146:
+    ```typescript
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      if (error.message.toLowerCase().includes('invalid login credentials')) {
+        throw new Error('Invalid email or password. (If you just signed up, please check your email inbox to confirm your email address, or disable "Confirm email" in Supabase settings).');
+      }
+      throw error;
+    }
+
+    if (data.session) {
+      setSuccessMessage('Signed in successfully! Redirecting...');
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.href = '/dashboard';
+        }
+      }, 800);
+    }
+    ```
+    *Observation*:
+    1. If a user has `email_confirmed_at === null` or Supabase returns error `"Email not confirmed"`, there is no dedicated unverified state handler or actionable "Resend Verification Email" button.
+    2. If `signInWithPassword` returns `data.user` where `data.user.email_confirmed_at === null`, it does not block the `/dashboard` redirect or tear down the unverified session with `supabase.auth.signOut()`.
+- **Auth Provider & Dashboard Gate**:
+  - `packages/web/src/components/providers/AuthProvider.tsx`: In `handleProvision`, `session.user` is processed without verifying `user.email_confirmed_at`.
+  - `packages/web/src/app/dashboard/page.tsx`: Checks only `!session` to redirect to `/login`.
+- **Auth Callback Handler**:
+  - `packages/web/src/app/auth/callback/page.tsx`: Captures the token from email confirmation redirect, provisions the user via `provisionUser(session.access_token)`, and navigates to `/dashboard`.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Toolchain & Workspace Resolution**:
-   - Observation 1A shows that Node v22.7.0 and pnpm 10.34.5 are located in `.tools/node/bin`.
-   - Observation 1A shows that pnpm requires a writable HOME directory for its cache and store.
-   - Prepending `.tools/node/bin` to `PATH` and setting `HOME` to `/home/md-roni-ahamed/Test project/.tmp_home` enables 100% deterministic command execution across the entire workspace.
-
-2. **Test Infrastructure Analysis**:
-   - Observation 1C demonstrates that `packages/web` and `packages/extension` use the modern Node.js native test runner (`node --experimental-strip-types --test`) for fast, ESM-native TypeScript test execution without heavy compile wrappers.
-   - Observation 1C shows that all 71 tests in the monorepo pass cleanly.
-   - To add test coverage for OpenRouter auth telemetry and error reporting, creating a dedicated test file in `packages/web/src/lib/__tests__/` (e.g. `openrouter-telemetry.test.ts`) using the existing `node:test` and `node:assert` framework will automatically be included in `pnpm test` without modifying any configuration.
-
-3. **Build Pipeline Analysis**:
-   - Observation 1D proves all three target builds (`build:web`, `build:api`, `build:ext`) succeed with zero TypeScript or compilation errors.
-   - `packages/web/next.config.js` includes `...(process.env.VERCEL ? {} : { output: 'standalone' })`. When building locally in workspace environments with spaces, passing `VERCEL=1` ensures standard Next.js asset bundling without standalone copy conflicts.
-
-4. **OpenRouter Upstream & Telemetry Test Harness Requirements**:
-   - Observation 1E identifies that OpenRouter's `/api/v1/auth/key` response returns `{ data: { label, usage, limit, is_free_tier, rate_limit: { requests, interval } } }`.
-   - Observation 1E reveals that error responses from OpenRouter `/api/v1/chat/completions` follow standard JSON structures (`{ error: { message, code } }` or HTTP 429 with free-tier daily cap text).
-   - Developing a mock harness that validates the parsing of these exact schemas will ensure robust telemetry display in `AdminAIConfig.tsx` and prevent regressions.
+1. **R3.1 & R3.2 (Signup Verification Enforcement & Confirmation Banner)**:
+   - *Premise*: New user accounts created via `/join` (or signup mode) must require email verification before any dashboard access is permitted.
+   - *Logic*: In `AuthForm.tsx` (`mode === 'signup'`), when `supabase.auth.signUp()` succeeds:
+     - Check `signUpData.user`. Even if a session is returned, if `user.email_confirmed_at === null` (or in all new email signups under mandatory verification policy), the client must immediately invalidate/sign out any temporary session (`await supabase.auth.signOut()`).
+     - The client must display the clear confirmation banner: `"Check your inbox! Please verify your email before logging in."`.
+     - The dashboard auto-redirect must be suppressed.
+2. **R3.3 (Unverified Account Detection & Resend Action on Sign-in)**:
+   - *Premise*: When an unverified user attempts to sign in via `/login` (`mode === 'signin'`), the system must detect their unverified status, block access, and offer a one-click resend action.
+   - *Logic*: In `AuthForm.tsx` (`mode === 'signin'`):
+     - Catch case 1: `supabase.auth.signInWithPassword` throws error with `error.message` matching `/email not confirmed/i` (standard Supabase Auth error).
+     - Catch case 2: `supabase.auth.signInWithPassword` succeeds and returns `data.user`, but `data.user.email_confirmed_at === null`.
+     - In either case:
+       - Block dashboard redirect.
+       - Immediately execute `await supabase.auth.signOut()`.
+       - Set unverified warning state (`isUnverified = true`, `unverifiedEmail = email`).
+       - Display a warning message: `"Your email address is not verified yet. Please check your inbox or click below to resend the verification email."`.
+       - Render a button: `Resend Verification Email`.
+       - When clicked, trigger `supabase.auth.resend({ type: 'signup', email: unverifiedEmail, options: { emailRedirectTo: `${window.location.origin}/auth/callback` } })`.
+       - Show feedback: `"Verification email resent! Please check your inbox (and spam folder)."`
+3. **R3.4 (Supabase Auth Project Configuration Documentation)**:
+   - *Premise*: Administrators need precise instructions on the Supabase project configuration to ensure verification emails are dispatched properly.
+   - *Logic*: Document the Supabase dashboard settings, SMTP mailer configuration, rate limits, and redirect URLs.
+4. **R4 (Multi-Package Integrity & Test Suite Integration)**:
+   - *Premise*: Existing builds and tests must remain green across `@draftpilot/web`, `@draftpilot/api`, and `@draftpilot/extension`.
+   - *Logic*: Monorepo scripts and testing harnesses are verified. New tests verifying email verification detection and resend flows should be added to `packages/web/src/lib/__tests__/email-verification.test.ts`.
 
 ---
 
 ## 3. Caveats
 
-1. **Outbound Network Sandboxing**: Outbound external HTTP requests (e.g. `curl https://openrouter.ai`) are restricted in the subagent sandbox environment. Live browser interactions in production execute directly from the client's browser context (where CSP allows `https://openrouter.ai` and `https://api.openrouter.ai`).
-2. **Next.js Standalone Build Flag**: The `output: 'standalone'` option in Next.js 14 requires `VERCEL=1` in the build environment to bypass local monorepo directory copying issues.
-3. **API Package Unit Tests**: `packages/api` uses Jest with `--passWithNoTests`. While backend business logic is mirrored and comprehensively covered in `packages/web/src/lib/__tests__/`, NestJS controller/service unit tests could optionally be added in `packages/api/src/` if desired.
+- **Supabase Local vs Cloud Auth Behavior**:
+  - In local development or mock environments without active SMTP, Supabase may either auto-confirm emails or fail to send outbound SMTP emails unless custom SMTP credentials are provided in Supabase Project Settings. The client-side checks for `user.email_confirmed_at === null` and `error.message.includes('Email not confirmed')` handle both Supabase cloud responses and local/mock responses robustly.
+- **Google OAuth Providers**:
+  - Google OAuth users authenticated via `signInWithOAuth` have their email addresses verified by Google, so Supabase automatically populates `email_confirmed_at` with an ISO timestamp. OAuth flows via `/auth/callback` will continue directly to `/dashboard`.
+- **No Source Code Modified During Survey**:
+  - This survey was performed in read-only mode in accordance with agent constraints.
 
 ---
 
-## 4. Conclusion
+## 4. Conclusion & Required Changes
 
-- The DraftPilot monorepo structure, workspace setup (`pnpm-workspace.yaml`), build scripts (`build:web`, `build:api`, `build:ext`), and test suites (`pnpm test`) are fully mapped, healthy, and verified.
-- The test infrastructure utilizes Node.js native test runner (`node:test`) for web and extension, and Jest for api, running 71 passing tests in under 500ms.
-- All three production builds are fully functional and pass with 0 errors.
-- OpenRouter `/api/v1/auth/key` and `/api/v1/chat/completions` integration points have been mapped, and the requirements for the telemetry grid and verbatim error handling are validated.
+### Summary of Changes Required
+
+| Component | Target File | Line(s) | Description of Changes |
+|-----------|-------------|---------|------------------------|
+| **Signup Confirmation Banner** | `packages/web/src/components/AuthForm.tsx` | 93–122 | On signup, clear temporary session (`supabase.auth.signOut()`), block dashboard redirect, and display banner: `"Check your inbox! Please verify your email before logging in."`. Provide option to resend if needed. |
+| **Login Unverified Detection & Warning** | `packages/web/src/components/AuthForm.tsx` | 124–150 | On signin, check if `error.message` includes `"email not confirmed"` or `data.user?.email_confirmed_at === null`. Block redirect, sign out, set `isUnverified` state, and show warning. |
+| **Resend Verification Button & Flow** | `packages/web/src/components/AuthForm.tsx` | New method & JSX | Implement `handleResendVerification()`, invoking `supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: ... } })`. Render `"Resend Verification Email"` button with loading and success states. |
+| **AuthProvider Protection** | `packages/web/src/components/providers/AuthProvider.tsx` | 55–80, 210–245 | Guard `handleProvision`: verify `session.user.email_confirmed_at` is non-null for email auth users; if null, prevent profile provisioning and sign out. |
+| **Dashboard Gate Protection** | `packages/web/src/app/dashboard/page.tsx` | 31–37 | If `user && user.email_confirmed_at === null`, block dashboard view and redirect to `/login?unverified=true`. |
+| **Automated Unit & Flow Tests** | `packages/web/src/lib/__tests__/email-verification.test.ts` | New file | Comprehensive test suite covering unverified user detection, signup banner requirement, login error interception, resend payload construction, and session teardown. |
 
 ---
 
-## 5. Verification Method
+## 5. Supabase Auth Configuration Guide
 
-To independently verify the entire monorepo test suite and all production builds:
+To enforce mandatory email verification in Supabase:
+
+1. **Enable Email Confirmations in Supabase Dashboard**:
+   - Go to **Supabase Dashboard** > **Authentication** > **Providers** > **Email**.
+   - Set **"Enable Email provider"** to `ON`.
+   - Set **"Confirm email"** to `ON` (Enabled).
+   - *(Optional)* Set **"Secure email change"** to `ON`.
+2. **Configure Redirect URLs**:
+   - Go to **Authentication** > **URL Configuration**.
+   - Set **Site URL**: `https://draftpilot-web.vercel.app` (or production domain).
+   - In **Redirect URLs**, add:
+     - `https://draftpilot-web.vercel.app/auth/callback`
+     - `http://localhost:3000/auth/callback`
+3. **Configure Custom SMTP Mailer**:
+   - Go to **Authentication** > **Email Templates** / **SMTP Settings**.
+   - Toggle **"Enable Custom SMTP"** to use production transactional email provider (Resend, SendGrid, Postmark, AWS SES).
+   - Provide Sender Name (`DraftPilot`), Sender Email (`no-reply@draftpilot.app`), Host, Port (587/465), User, and Password.
+   - Adjust rate limits under **Authentication** > **Rate Limits** (default is 30 emails/hour per project for free tier).
+
+---
+
+## 6. Verification Method
+
+### 6.1 Automated Suite Verification Commands
+Run the following commands in the workspace root to independently verify the changes:
 
 ```bash
-# 1. Configure toolchain PATH and HOME environment
+# Set environment tools
 export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"
 export HOME="/home/md-roni-ahamed/Test project/.tmp_home"
-export VERCEL=1
 
-# 2. Run full monorepo test suite (71 passing tests)
+# 1. Run all unit and integration tests across the monorepo
 pnpm test
 
-# 3. Run all production builds
+# 2. Run dedicated web test runner (including new email verification tests)
+pnpm --filter @draftpilot/web test
+
+# 3. Verify production builds across all 3 packages
 pnpm build:web
 pnpm build:api
 pnpm build:ext
-
-# 4. Verify linting
-pnpm lint
 ```
 
-**Files to Inspect**:
-- `/home/md-roni-ahamed/Test project/package.json`
-- `/home/md-roni-ahamed/Test project/pnpm-workspace.yaml`
-- `/home/md-roni-ahamed/Test project/packages/web/package.json`
-- `/home/md-roni-ahamed/Test project/packages/api/package.json`
-- `/home/md-roni-ahamed/Test project/packages/extension/package.json`
-- `/home/md-roni-ahamed/Test project/packages/web/src/lib/__tests__/`
-- `/home/md-roni-ahamed/Test project/packages/web/src/components/admin/AdminAIConfig.tsx`
+### 6.2 Inspection Points & Invalidation Conditions
+- **Invalidation Condition 1**: If a newly registered user on `/join` is automatically redirected to `/dashboard` without verifying their email address.
+- **Invalidation Condition 2**: If an unverified user logs in and does not see a clear warning banner with an actionable `"Resend Verification Email"` button.
+- **Invalidation Condition 3**: If clicking `"Resend Verification Email"` fails to call `supabase.auth.resend` or does not display confirmation feedback.
+- **Invalidation Condition 4**: If any of `pnpm test`, `pnpm build:web`, `pnpm build:api`, or `pnpm build:ext` fail.

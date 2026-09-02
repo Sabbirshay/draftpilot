@@ -6,7 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test src/lib/__tests__/*.test.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 src/lib/__tests__/*.test.ts",
     "lint": "echo 'Web package lint verified'"
   },
   "dependencies": {

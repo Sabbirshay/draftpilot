@@ -26,7 +26,7 @@ export interface AdminAuthResult {
 /**
  * Constant-time comparison between two strings to prevent timing attacks.
  */
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const bufA = Buffer.from(a, 'utf-8');
   const bufB = Buffer.from(b, 'utf-8');
@@ -36,9 +36,72 @@ function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+// In-memory cache for dynamic root passkey (30-second TTL)
+let cachedDbPasskey: string | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL_MS = 30000;
+
+/**
+ * Manually update or invalidate the in-memory root passkey cache.
+ */
+export function setCachedRootPasskey(passkey: string | null): void {
+  cachedDbPasskey = passkey ? passkey.trim() : null;
+  cacheTimestamp = Date.now();
+}
+
+/**
+ * Clear the in-memory root passkey cache.
+ */
+export function clearCachedRootPasskey(): void {
+  cachedDbPasskey = null;
+  cacheTimestamp = 0;
+}
+
+/**
+ * Resolves the active root passkey dynamically:
+ * 1. Checks in-memory cache for dynamic DB passkey (30s TTL).
+ * 2. If expired or empty, queries database singleton in `platform_settings.root_passkey`.
+ * 3. Falls back to environment variables (`ADMIN_PASSKEY` or `SUPERADMIN_PASSKEY`).
+ */
+export async function getActiveRootPasskey(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedDbPasskey !== null && now - cacheTimestamp < CACHE_TTL_MS) {
+    return cachedDbPasskey;
+  }
+
+  try {
+    const fetchDbPasskey = async () => {
+      const { data, error } = await supabaseAdmin
+        .from('platform_settings')
+        .select('root_passkey')
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data?.root_passkey && typeof data.root_passkey === 'string' && data.root_passkey.trim()) {
+        return data.root_passkey.trim();
+      }
+      return null;
+    };
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 150));
+    const dbPasskey = await Promise.race([fetchDbPasskey(), timeoutPromise]);
+
+    if (dbPasskey) {
+      cachedDbPasskey = dbPasskey;
+      cacheTimestamp = now;
+      return dbPasskey;
+    }
+  } catch {
+    // Fall through to environment variables on database query error
+  }
+
+  const envPasskey = (process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY)?.trim() || null;
+  return envPasskey;
+}
+
 /**
  * Shared admin auth verification for admin API routes.
- * 1. Checks server-side admin passkey header (ADMIN_PASSKEY or SUPERADMIN_PASSKEY) using constant-time comparison
+ * 1. Checks server-side admin passkey header (dynamic platform_settings.root_passkey or env vars) using constant-time comparison
  * 2. Extracts Authorization: Bearer <token>
  * 3. Verifies token with Supabase auth
  * 4. Confirms user is a superadmin via DB role or SUPERADMIN_EMAILS env var
@@ -47,9 +110,11 @@ function timingSafeEqual(a: string, b: string): boolean {
 export async function verifySuperAdmin(req: Request): Promise<AdminAuthResult> {
   // 1. Check direct server-only admin passkey header (constant-time verification)
   const passkey = req.headers.get('x-admin-passkey')?.trim();
-  const configuredPasskey = (process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY)?.trim();
-  if (passkey && configuredPasskey && timingSafeEqual(passkey, configuredPasskey)) {
-    return { authorized: true };
+  if (passkey) {
+    const configuredPasskey = await getActiveRootPasskey();
+    if (configuredPasskey && timingSafeEqual(passkey, configuredPasskey)) {
+      return { authorized: true };
+    }
   }
 
   // 2. Check Authorization Bearer token

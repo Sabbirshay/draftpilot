@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import AdminGuard from '@/components/admin/AdminGuard';
 import AdminSidebar, { AdminTab } from '@/components/admin/AdminSidebar';
 import AdminOverview from '@/components/admin/AdminOverview';
+import AdminUsers from '@/components/admin/AdminUsers';
 import AdminWorkspaces from '@/components/admin/AdminWorkspaces';
 import AdminAIConfig from '@/components/admin/AdminAIConfig';
 import AdminGlobalMacros from '@/components/admin/AdminGlobalMacros';
@@ -39,6 +40,7 @@ export default function AdminPage() {
               <span className="text-text-dim">/</span>
               <span className="text-accent-light font-bold capitalize">
                 {activeTab === 'overview' && 'Overview'}
+                {activeTab === 'users' && 'User Management & Ban Registry'}
                 {activeTab === 'workspaces' && 'Workspaces & Quotas'}
                 {activeTab === 'ai-config' && 'AI Models & LLM Tuning'}
                 {activeTab === 'global-macros' && 'Global Knowledge Base'}
@@ -64,6 +66,7 @@ export default function AdminPage() {
                 onSelectAiConfigTab={() => setActiveTab('ai-config')}
               />
             )}
+            {activeTab === 'users' && <AdminUsers />}
             {activeTab === 'workspaces' && <AdminWorkspaces />}
             {activeTab === 'ai-config' && <AdminAIConfig />}
             {activeTab === 'global-macros' && <AdminGlobalMacros />}

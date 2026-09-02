@@ -21,10 +21,56 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
+  const [isUnverified, setIsUnverified] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccessMessage, setResendSuccessMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('unverified') === 'true') {
+        setIsUnverified(true);
+        setError('Your email is not verified yet. Please check your inbox or click below to resend the verification email.');
+      }
+    }
+  }, []);
+
+  const handleResendVerification = async () => {
+    setError(null);
+    setResendSuccessMessage(null);
+    const targetEmail = (unverifiedEmail || email).trim();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      setError('Please enter your email address in the field above to resend verification.');
+      return;
+    }
+
+    setResendLoading(true);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const { error: resendErr } = await supabase.auth.resend({
+        type: 'signup',
+        email: targetEmail,
+        options: {
+          emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+        },
+      });
+
+      if (resendErr) throw resendErr;
+      setResendSuccessMessage(`Verification email sent to ${targetEmail}! Please check your inbox and spam folder.`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend verification email. Please try again.');
+    } finally {
+      setResendLoading(false);
+    }
+  };
 
   const handleForgotPassword = async () => {
     setError(null);
     setSuccessMessage(null);
+    setIsUnverified(false);
+    setResendSuccessMessage(null);
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
@@ -54,6 +100,8 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
 
   const handleGoogleSignIn = async () => {
     setError(null);
+    setIsUnverified(false);
+    setResendSuccessMessage(null);
     setGoogleLoading(true);
     try {
       // Dynamic import to avoid SSR issues
@@ -85,53 +133,64 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+    setResendSuccessMessage(null);
+    setIsUnverified(false);
     setLoading(true);
 
     try {
       const { supabase } = await import('@/lib/supabase');
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
       if (mode === 'signup') {
         // Sign up via Supabase Auth directly
         const { data: signUpData, error } = await supabase.auth.signUp({
-          email,
+          email: email.trim(),
           password,
           options: {
             data: {
               full_name: teamName ? teamName.split("'")[0] : email.split('@')[0],
               team_name: teamName || `${email.split('@')[0]}'s Team`,
             },
-            emailRedirectTo: typeof window !== 'undefined'
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
+            emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
           },
         });
 
         if (error) throw error;
 
-        if (signUpData.session) {
-          // Instant session available — auto redirect to onboarding dashboard
-          setSuccessMessage('Account created! Setting up your dashboard...');
-          setTimeout(() => {
-            if (typeof window !== 'undefined') {
-              window.location.href = '/dashboard';
-            }
-          }, 800);
-        } else {
-          // Email confirmation is required by Supabase
-          setSuccessMessage('Account created! If email confirmation is enabled in your Supabase project, please check your inbox (and spam) to confirm your email before signing in.');
-        }
+        // Invalidate any temporary session so unverified users cannot enter dashboard
+        await supabase.auth.signOut();
+
+        // Enforce email verification banner and suppress auto-redirect to /dashboard
+        setIsUnverified(false);
+        setSuccessMessage('Check your inbox! Please verify your email before logging in.');
       } else {
         // Sign in
         const { data, error } = await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password,
         });
 
         if (error) {
-          if (error.message.toLowerCase().includes('invalid login credentials')) {
-            throw new Error('Invalid email or password. (If you just signed up, please check your email inbox to confirm your email address, or disable "Confirm email" in Supabase settings).');
+          const errMsg = error.message.toLowerCase();
+          if (errMsg.includes('email not confirmed') || errMsg.includes('email is not confirmed')) {
+            await supabase.auth.signOut();
+            setIsUnverified(true);
+            setUnverifiedEmail(email.trim());
+            setError('Your email is not verified yet. Please check your inbox or click below to resend the verification email.');
+            return;
+          }
+          if (errMsg.includes('invalid login credentials')) {
+            throw new Error('Invalid email or password.');
           }
           throw error;
+        }
+
+        if (data?.user && data.user.email_confirmed_at === null) {
+          await supabase.auth.signOut();
+          setIsUnverified(true);
+          setUnverifiedEmail(email.trim());
+          setError('Your email is not verified yet. Please check your inbox or click below to resend the verification email.');
+          return;
         }
 
         if (data.session) {
@@ -144,7 +203,20 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication');
+      const errMsg = (err.message || '').toLowerCase();
+      if (errMsg.includes('email not confirmed') || errMsg.includes('email is not confirmed')) {
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          await supabase.auth.signOut();
+        } catch {
+          // ignore
+        }
+        setIsUnverified(true);
+        setUnverifiedEmail(email.trim());
+        setError('Your email is not verified yet. Please check your inbox or click below to resend the verification email.');
+      } else {
+        setError(err.message || 'An error occurred during authentication');
+      }
     } finally {
       setLoading(false);
     }
@@ -187,7 +259,54 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
 
             {/* Error / Success Feedback */}
             <AnimatePresence>
-              {error && (
+              {isUnverified && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="mb-5 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-3"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <svg className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                      <p className="font-semibold text-amber-300">Email Verification Required</p>
+                      <p className="text-text-muted mt-0.5 leading-relaxed">
+                        {error || 'Please verify your email before logging in. Check your inbox for the confirmation link.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={resendLoading}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {resendLoading ? (
+                        <>
+                          <svg className="animate-spin w-3.5 h-3.5 text-amber-300" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                          <span>Resending...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span>Resend Verification Email</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {error && !isUnverified && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -200,6 +319,21 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                   <span>{error}</span>
                 </motion.div>
               )}
+
+              {resendSuccessMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="mb-5 p-3.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  <span>{resendSuccessMessage}</span>
+                </motion.div>
+              )}
+
               {successMessage && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
@@ -366,6 +500,8 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                       setMode('signup');
                       setError(null);
                       setSuccessMessage(null);
+                      setIsUnverified(false);
+                      setResendSuccessMessage(null);
                     }}
                     className="font-bold text-accent hover:text-accent-light transition-colors ml-1 cursor-pointer"
                   >
@@ -381,6 +517,8 @@ export default function AuthForm({ initialMode = 'signin' }: AuthFormProps) {
                       setMode('signin');
                       setError(null);
                       setSuccessMessage(null);
+                      setIsUnverified(false);
+                      setResendSuccessMessage(null);
                     }}
                     className="font-bold text-accent hover:text-accent-light transition-colors ml-1 cursor-pointer"
                   >

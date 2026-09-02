@@ -205,6 +205,27 @@ export async function POST(req: NextRequest) {
   }
 
   const user = authData.user;
+  const userEmail = (user.email || '').trim().toLowerCase();
+
+  // Ban Registry Check
+  if (userEmail) {
+    const { data: bannedEntry } = await supabaseAdmin
+      .from('banned_emails')
+      .select('id, reason')
+      .ilike('email', userEmail)
+      .maybeSingle();
+
+    if (bannedEntry) {
+      return NextResponse.json(
+        {
+          error: 'Account deactivated. Please contact support.',
+          banned: true,
+          reason: bannedEntry.reason || 'Account deactivated by Super Admin',
+        },
+        { status: 403 }
+      );
+    }
+  }
 
   // 2. Rate Limiting Check (20 requests per 60 seconds)
   const now = Date.now();

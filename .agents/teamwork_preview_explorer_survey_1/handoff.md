@@ -1,190 +1,160 @@
-# Initial Survey Investigation Report: OpenRouter Integration, Upstream Error Handling & Telemetry
+# Handoff Report — Requirement 1: Super Admin User Deletion & Permission Registry
+
+## Executive Summary
+This investigation surveys the entire DraftPilot monorepo architecture across database migrations, Next.js web application, NestJS backend API, and Chrome extension to design and specify Requirement 1: **Super Admin User Deletion & Access Control Registry (`banned_emails`)**. It defines the persistent schema, interceptors across all authentication & AI draft generation entry points, Super Admin dashboard user management UI, and 1-click permission restoration mechanism.
+
+---
 
 ## 1. Observation
 
-Direct code observations from the DraftPilot codebase across `packages/web`, `packages/api`, and `packages/extension`:
+### 1.1 Database Tables & Migrations
+- **Location**: `packages/api/supabase/migrations/`
+  - `001_initial_schema.sql`: Defines `teams`, `users`, `macros`, `knowledge_documents`, `document_chunks`, `usage`, `draft_history`.
+  - `002_auth_onboarding.sql`: Adds `team_members` junction, `onboarding_state`, and profile fields (`full_name`, `avatar_url`) to `users`.
+  - `003_strict_rls_security.sql`: Implements strict RLS for multi-tenant isolation and service role full bypass policies.
+  - `004_platform_settings.sql` & `005_secure_platform_settings.sql`: Defines singleton `platform_settings` table restricted to `service_role`.
+  - `006_harden_user_tenant_rls.sql`: Hardens `users` UPDATE and `teams` INSERT policies against privilege escalation.
+- **Current Absence**: No `banned_emails` table or user deactivation registry currently exists in the schema.
 
-### 1.1 OpenRouter API Call Points & Draft Generation Call Handlers
-1. **Next.js Web Draft Generation Endpoint (`/api/drafts/generate`)**:
-   - **File**: `packages/web/src/app/api/drafts/generate/route.ts`
-   - **Lines 256–345**:
-     ```typescript
-     if (settings && settings.openrouter_api_key) {
-       try {
-         const activeModel = settings.selected_model || settings.openrouter_model || 'google/gemma-4-26b-a4b-it:free';
-         const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
-         // Primary call (8s timeout)
-         let openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-           method: 'POST',
-           headers: {
-             'Content-Type': 'application/json',
-             Authorization: `Bearer ${settings.openrouter_api_key}`,
-             'HTTP-Referer': 'https://draftpilot-web.vercel.app',
-             'X-Title': 'DraftPilot',
-           },
-           body: JSON.stringify({
-             model: activeModel,
-             messages: [
-               { role: 'system', content: strictSystemPrompt },
-               { role: 'user', content: userPrompt },
-             ],
-             max_tokens: Math.max(1000, Number(settings.max_tokens) || 1000),
-             temperature: parseFloat(settings.temperature as string) || 0.4,
-             include_reasoning: false,
-             reasoning: { max_tokens: 0 },
-           }),
-           signal: AbortSignal.timeout(8000),
-         });
-         let openRouterData = await openrouterRes.json().catch(() => null);
-         // Fallback model call
-         if ((!openrouterRes.ok || !openRouterData?.choices?.[0]) && fallbackModel !== activeModel) {
-           console.warn(`Primary model ${activeModel} failed (${openrouterRes.status}). Attempting auto-fallback to ${fallbackModel}...`);
-           const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', { ... });
-           ...
-         }
-         ...
-       } catch (aiErr) {
-         console.warn('Server OpenRouter generation note:', aiErr);
-       }
-     }
-     ```
-   - **Lines 348–363**: Degrades to `synthesizeSmartSupportDraft(threadContent, customerName)` if OpenRouter calls fail.
-   - **Lines 380–385**: Always returns HTTP 200 `{ draft: draftText, macroUsed: ..., confidence: ... }` to caller.
+### 1.2 User Storage & Authentication Architecture
+- **Supabase Auth (`auth.users`)**: Manages identity, passwords, OAuth tokens, and `email_confirmed_at`.
+- **Public Schema (`public.users`)**:
+  - Schema: `id UUID PRIMARY KEY`, `team_id UUID REFERENCES teams(id) ON DELETE CASCADE`, `email TEXT NOT NULL`, `role TEXT NOT NULL DEFAULT 'owner'`, `full_name TEXT`, `avatar_url TEXT`, `created_at TIMESTAMPTZ`.
+  - Foreign key cascades: `team_members.user_id`, `draft_history.user_id` cascade delete on user removal.
+- **Client Session Provider (`packages/web/src/components/providers/AuthProvider.tsx`)**:
+  - Calls `GET /api/auth/me` on mount and session change (lines 60-84) to fetch user profile, team data, and onboarding state.
+  - Falls back to direct client-side Supabase query on `public.users` (lines 94-208).
+- **NestJS Auth Guard (`packages/api/src/auth/auth.guard.ts`)**:
+  - Intercepts bearer token, resolves user via `client.auth.getUser(token)`, and fetches `users` record (lines 21-38).
 
-2. **NestJS Backend AI Provider Service (`AiProviderService`)**:
-   - **File**: `packages/api/src/drafts/ai-provider.service.ts`
-   - **Lines 77–148**: Executes dual-model OpenRouter calls to `https://openrouter.ai/api/v1/chat/completions` with 8s timeouts.
-   - **Lines 173–174**: Falls back to `synthesizeSmartDraft(prompt, customerName)` on error.
-   - **File**: `packages/api/src/drafts/drafts.service.ts` (lines 47–150): Invoked by `DraftsController` (`POST /drafts/generate`). Checks billing limits, queries macros and KB chunks, calls `AiProviderService.generateText()`, and stores results in `draft_history`.
+### 1.3 AI Draft Generation Endpoints & Interception Points
+- **Web App API Route (`packages/web/src/app/api/drafts/generate/route.ts`)**:
+  - Line 195-207: Authenticates caller via `supabaseAdmin.auth.getUser(token)`.
+  - Line 209-231: Applies in-memory rate limiting.
+  - Line 237-244: Fetches `dbUser` and `team_id`.
+  - Line 251-283: Enforces workspace monthly quota.
+  - Line 311-399: Calls OpenRouter upstream with Gemma fallback.
+  - Line 402-417: Degrades to local 5-intent domain synthesizer if OpenRouter fails.
+  - Line 422-448: Records event in `draft_history` and increments `usage`.
+  - *Current Vulnerability*: Does not check for banned email status; deactivated users could continue generating drafts if tokens remain cached or if they call the endpoint.
+- **Backend Service (`packages/api/src/drafts/drafts.service.ts`)**:
+  - Protected by `AuthGuard` on `DraftsController.generate()` (`packages/api/src/drafts/drafts.controller.ts:10-18`).
+- **Chrome Extension Client (`packages/extension/src/utils/api-client.ts`)**:
+  - `generateDraft()` (lines 530-702): Sends request to `https://draftpilot-web.vercel.app/api/drafts/generate`.
+  - Fallback logic (lines 603-665): Falls back to local template synthesizer on network error. Needs explicit distinction so HTTP 403 Forbidden with `banned: true` immediately terminates generation and alerts user rather than silently producing a fallback draft.
 
-3. **Admin Settings & Interactive Playground Component (`AdminAIConfig.tsx`)**:
-   - **File**: `packages/web/src/components/admin/AdminAIConfig.tsx`
-   - **Lines 187–216 (`handleVerifyKey`)**:
-     ```typescript
-     const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
-       headers: { Authorization: `Bearer ${trimmed}` },
-     });
-     const json = await res.json().catch(() => null);
-     if (res.ok && json?.data) {
-       setKeyStatus('valid');
-       const label = json.data.label ? ` (${json.data.label})` : '';
-       setKeyVerifyMessage(`Verified & Active${label}`);
-       ...
-     } else {
-       setKeyStatus('invalid');
-       setKeyVerifyMessage(json?.error?.message || 'Invalid OpenRouter Key');
-     }
-     ```
-   - **Lines 315–480 (`handleTestDraft`)**: Executes client-side test generation directly to `https://openrouter.ai/api/v1/chat/completions` from browser, tries primary model and fallback model, cleans output, and checks errors.
-   - **Lines 461–474 & 746–759**: Error evaluation in playground:
-     ```typescript
-     const errMsg = data?.error?.message || '';
-     if (errMsg.includes('Rate limit') || errMsg.includes('credits') || response.status === 429) {
-       setRateLimitWarning(errMsg);
-       const smartReply = generateSmartSupportReply(testThread);
-       setTestResponse(smartReply);
-       ...
-     }
-     ```
-     UI banner rendered:
-     ```tsx
-     {rateLimitWarning && (
-       <div className="mt-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] space-y-2">
-         <div className="flex items-center justify-between text-amber-400 font-bold text-[10px]">
-           <span>⚠️ OpenRouter Free-Tier Daily Limit Reached</span>
-           <span className="font-mono">50 reqs/day on $0 balance</span>
-         </div>
-         <p className="text-text-muted leading-relaxed">
-           OpenRouter limits accounts with <strong className="text-text">$0 credit balance</strong> to 50 requests/day across all free models...
-         </p>
-         ...
-       </div>
-     )}
-     ```
-
-4. **Chrome Extension Invocation Client (`ApiClient`)**:
-   - **File**: `packages/extension/src/utils/api-client.ts`
-   - **Lines 575–597**: Calls `POST https://draftpilot-web.vercel.app/api/drafts/generate` with JWT bearer token.
-   - **Lines 603–665**: Executes local client-side `synthesizeSmartSupportDraft` if web API request fails or is offline.
+### 1.4 Admin Dashboard & Control Surface
+- **Admin Page (`packages/web/src/app/admin/page.tsx`)**:
+  - Renders tabs: `overview`, `workspaces`, `ai-config`, `global-macros`, `billing`, `security`, `features` (lines 41-48, 60-73).
+- **Admin Sidebar (`packages/web/src/components/admin/AdminSidebar.tsx`)**:
+  - Type `AdminTab` defines navigation options (lines 7-14).
+- **Admin Security Guard (`packages/web/src/components/admin/AdminGuard.tsx`)**:
+  - Validates `x-admin-passkey` via `/api/admin/metrics` or session token matching `SUPERADMIN_EMAILS` (lines 48-117).
+- **Existing Admin API Routes (`packages/web/src/app/api/admin/*`)**:
+  - `workspaces/route.ts`: Manages team plans and monthly draft quotas.
+  - `metrics/route.ts`: Aggregates active workspaces, draft counts, MRR, passkey verification.
+  - `ai-config/route.ts`, `feature-flags/route.ts`, `global-macros/route.ts`, `billing/route.ts`.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Error Propagation & Deserialization Trace**:
-   - In both `route.ts` (lines 300 & 342) and `ai-provider.service.ts` (lines 105 & 146), errors from `https://openrouter.ai/api/v1/chat/completions` are caught locally in a `try...catch` block.
-   - The endpoints do NOT rethrow or propagate status codes (401, 402, 429, 503) or error messages upstream to the caller (e.g. extension or web frontend).
-   - Instead, the server swallows the error, executes the domain synthesizer fallback, and responds with HTTP 200 `{ draft: draftText, macroUsed: ..., confidence: ... }`.
-   - Result: Upstream OpenRouter failure modes are completely invisible to the Chrome Extension user and standard web callers.
+1. **Persistent Banning Registry**:
+   - Because user deletion in Supabase Auth removes the user record, deleting an account alone is insufficient to prevent re-registration or token replay with that same email address.
+   - Therefore, a persistent access registry table (`banned_emails`) is necessary to store deactivated/banned email addresses with case-insensitive uniqueness (`LOWER(email)`).
 
-2. **Error Conflation in Playground (`AdminAIConfig.tsx`)**:
-   - In `AdminAIConfig.tsx` line 462, any error that returns HTTP status 429, or whose message contains the substring `'Rate limit'` or `'credits'`, triggers `setRateLimitWarning(errMsg)`.
-   - The banner rendered in lines 746–759 statically assumes the cause is the free-tier daily cap (`"⚠️ OpenRouter Free-Tier Daily Limit Reached"`, `"50 reqs/day on $0 balance"`).
-   - This conflates four completely distinct failure modes:
-     1. **Free-tier daily account cap** (50 reqs/day on $0 balance).
-     2. **Per-minute concurrency / burst limit** (20 reqs/min).
-     3. **Upstream provider queue congestion / capacity overload** (503 Service Unavailable / 529 Site Overloaded / model busy).
-     4. **Account credit exhaustion / payment required** (HTTP 402 Payment Required).
-     5. **Invalid / unauthenticated API key** (HTTP 401 Unauthorized).
-   - The verbatim error message returned by OpenRouter (`data?.error?.message`) is NOT rendered inside the warning banner — the banner only displays hardcoded static text.
+2. **Full-Spectrum Enforcement / Gateway Blocking**:
+   - When an email is present in `banned_emails`, access must be blocked at four distinct layers:
+     - **Sign-Up Layer** (`AuthForm.tsx`, `packages/api/src/auth/auth.service.ts`): Block creation of new accounts with a banned email.
+     - **Sign-In / Auth Provisioning Layer** (`/api/auth/me`, `AuthProvider.tsx`, `AuthGuard.ts`): Block session establishment, revoke tokens, and force logout with a clear deactivation banner.
+     - **Dashboard Access Layer** (`/dashboard`, `DashboardPage.tsx`): Block rendering and redirect to sign-in with banner.
+     - **AI Draft Generation Layer** (`/api/drafts/generate/route.ts`, `DraftsService.ts`, `api-client.ts`): Immediately reject draft generation requests with HTTP 403 Forbidden (`{ error: '...', banned: true }`) without triggering local offline fallback synthesizer.
 
-3. **Key Quota & Balance Telemetry Gap (`handleVerifyKey`)**:
-   - OpenRouter's `/api/v1/auth/key` endpoint returns comprehensive live metadata:
-     - `data.label`: Key name
-     - `data.usage`: Credits used ($)
-     - `data.limit`: Credit limit ($ or null for unlimited)
-     - `data.limit_remaining`: Remaining credit limit ($)
-     - `data.is_free_tier`: Boolean flag indicating if account is on free tier
-     - `data.rate_limit.requests` and `data.rate_limit.interval`: Concurrency rate limits (e.g. 20 requests per 10s/1m)
-   - In `AdminAIConfig.tsx` lines 201–208, only `data.label` is extracted. `usage`, `limit`, `limit_remaining`, `is_free_tier`, and `rate_limit` are currently discarded and not presented in the UI.
+3. **Super Admin User Management UI & 1-Click Restoration**:
+   - In `AdminSidebar.tsx` and `AdminPage.tsx`, add a dedicated `users` tab ("User Management & Ban Registry").
+   - Create `AdminUsers.tsx` component with:
+     - Active Users Table: Full name, email, workspace name, role, draft usage, created date, and "Delete & Ban User" action.
+     - Banned Users Registry Table: Banned email, reason, timestamp, and 1-click "Restore Permission" button.
+     - Confirmation modal before account deletion to prevent accidental deletion.
+   - Create `packages/web/src/app/api/admin/users/route.ts` to handle:
+     - `GET`: Fetch active users (joined with team data) and all `banned_emails`.
+     - `POST` / `DELETE` actions for `ban` (record in `banned_emails`, delete auth user & public user) and `unban` (delete from `banned_emails`).
 
 ---
 
-## 3. Caveats
+## 3. Caveats & Edge Cases
 
-1. **Environment Sandbox & Live API Keys**: Local test suites run in sandbox mode with mock/local tokens. Live testing against `https://openrouter.ai` requires a valid API key (`sk-or-v1-...`) and active network connectivity.
-2. **OpenRouter Rate Limits Evolution**: OpenRouter adjusts rate limit caps (e.g. 20 req/min vs 50 req/day for free tier vs 1,000 req/day for accounts with $10+ credits). Live telemetry should query `/api/v1/auth/key` dynamically rather than hardcoding static limits.
-3. **No Caveats** regarding file paths or architecture — all call points and components have been mapped and verified.
+1. **Email Case Sensitivity**:
+   - Users may enter `User@Example.com` during signup or `user@example.com` in admin panels. All checks against `banned_emails` must strictly use `.toLowerCase().trim()` and SQL `LOWER(email) = LOWER($1)` with a functional or lowercase index (`idx_banned_emails_email`).
+
+2. **Cascade Deletion Considerations**:
+   - Deleting a user who is the sole `owner` of a workspace could leave orphaned teams or macros unless handled. The admin API route should either clean up the workspace if no other members exist, or reassign ownership if multiple members exist.
+
+3. **Extension Offline Fallback Masking**:
+   - The Chrome extension (`packages/extension/src/utils/api-client.ts`) includes a client-side fallback synthesizer for offline resilience. It must be explicitly configured NOT to fall back when the server returns HTTP 403 with `banned: true`.
+
+4. **Service Role Security**:
+   - `banned_emails` must have RLS enabled and be restricted to `service_role` to prevent normal authenticated users from reading the ban registry.
 
 ---
 
-## 4. Conclusion
+## 4. Conclusion & Concrete Specification
 
-1. **Exact Files Requiring Enhancement**:
-   - `packages/web/src/components/admin/AdminAIConfig.tsx`:
-     - Upgrade `handleVerifyKey` to query `/api/v1/auth/key`, parse full `data` object (`usage`, `limit`, `limit_remaining`, `is_free_tier`, `rate_limit`), and render live telemetry badge/metrics in the UI.
-     - Upgrade `handleTestDraft` and the playground error banner to differentiate between:
-       - 429 Daily Limit (50 req/day on $0 balance) vs 429 Concurrency (20 req/min)
-       - 503/529 Model Provider Congestion (busy free model)
-       - 401 Invalid API Key
-       - 402 Insufficient Balance
-     - Display the **verbatim upstream OpenRouter error message** inside the banner alongside tailored, actionable resolution guidance.
-   - `packages/web/src/lib/__tests__/ai-pipeline.test.ts`: Add comprehensive test suites verifying `/api/v1/auth/key` response parsing, telemetry display structures, 429 vs 503 error classification, and verbatim error extraction.
+### 4.1 Required Database Migration: `007_banned_emails_registry.sql`
+```sql
+-- Migration 007: Persistent Banned Emails & Access Registry
+CREATE TABLE IF NOT EXISTS banned_emails (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  reason TEXT DEFAULT 'Banned by Super Admin',
+  banned_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-2. **Architecture Assessment**:
-   - The multi-tier fallback cascade (Tier 1 primary model -> Tier 2 secondary model -> Tier 3 macro/KB fallback -> Tier 4 5-intent domain synthesizer) operates smoothly and reliably.
-   - The existing fallback synthesizer guarantees zero-downtime customer support drafts even during severe upstream OpenRouter rate limiting.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_banned_emails_lower_email ON banned_emails (LOWER(email));
+
+ALTER TABLE banned_emails ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service Role Full Access on Banned Emails"
+  ON banned_emails
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+```
+
+### 4.2 Required Files to Create or Modify
+
+| File Path | Action | Description |
+|-----------|--------|-------------|
+| `packages/api/supabase/migrations/007_banned_emails_registry.sql` | Create | Database schema and index for `banned_emails`. |
+| `packages/web/src/app/api/admin/users/route.ts` | Create | Admin API endpoint for user listing, banning/deletion, and 1-click restoration. |
+| `packages/web/src/components/admin/AdminUsers.tsx` | Create | Super Admin UI for user management, deletion modals, and banned registry table. |
+| `packages/web/src/components/admin/AdminSidebar.tsx` | Modify | Add `'users'` tab ("User Management") to `AdminTab` enum and nav items. |
+| `packages/web/src/app/admin/page.tsx` | Modify | Integrate `AdminUsers` view into tab router. |
+| `packages/web/src/app/api/auth/me/route.ts` | Modify | Intercept banned emails and return 403 Forbidden with `{ banned: true }`. |
+| `packages/web/src/app/api/drafts/generate/route.ts` | Modify | Intercept banned user emails before draft generation and return 403 Forbidden. |
+| `packages/web/src/components/providers/AuthProvider.tsx` | Modify | Handle 403/banned response on session load, clear tokens, and display warning. |
+| `packages/web/src/components/AuthForm.tsx` | Modify | Surface deactivation notice on banned login/signup attempts. |
+| `packages/extension/src/utils/api-client.ts` | Modify | Handle 403 Forbidden without falling back to local synthesizer. |
+| `packages/api/src/auth/auth.guard.ts` | Modify | Check `banned_emails` in NestJS backend guard. |
+| `packages/api/src/auth/auth.service.ts` | Modify | Check `banned_emails` in NestJS `login()`, `register()`, and `provision()`. |
+| `packages/web/src/lib/__tests__/admin-users-ban.test.ts` | Create | Comprehensive automated test suite verifying deletion, ban registry, interception, and restoration. |
 
 ---
 
 ## 5. Verification Method
 
-1. **Run Full Monorepo Test Suite**:
-   ```bash
-   export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"
-   export HOME="/home/md-roni-ahamed/Test project/.tmp_home"
-   export PNPM_HOME="/home/md-roni-ahamed/Test project/.tmp_home/share/pnpm"
-   pnpm test
-   ```
-   *Expected Result*: All 64+ unit and integration tests pass across packages.
+1. **Automated Unit & Integration Tests**:
+   - Run: `pnpm test` (verify all existing 112+ web tests, 13 NestJS tests, 9 extension tests pass, plus new admin ban tests).
+   - Test Cases:
+     - Verify Super Admin can list all users and banned registry via `GET /api/admin/users`.
+     - Verify deleting/banning a user inserts lowercase email into `banned_emails` and deletes auth/public user records.
+     - Verify banned user calling `/api/drafts/generate` receives HTTP 403 Forbidden with `{ banned: true }`.
+     - Verify banned user calling `/api/auth/me` receives HTTP 403 Forbidden.
+     - Verify 1-click restore removes email from `banned_emails` and allows access again.
 
-2. **Run Monorepo Production Builds**:
-   ```bash
-   pnpm build:ext
-   pnpm build:api
-   pnpm build:web
-   ```
-   *Expected Result*: All packages compile and produce production bundles without type or build errors.
-
-3. **Inspect Modified Files**:
-   - Inspect `AdminAIConfig.tsx` to verify key telemetry parsing from `/api/v1/auth/key` and verbatim error banner rendering.
+2. **Full Monorepo Production Builds**:
+   - `pnpm build:web` (Next.js production build verification)
+   - `pnpm build:api` (NestJS production build verification)
+   - `pnpm build:ext` (Vite extension production build verification)

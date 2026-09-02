@@ -56,6 +56,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const authUser = currentSession.user;
     if (!authUser) return;
 
+    // Guard: Ensure users with unverified emails are not provisioned or treated as active sessions
+    if (authUser.email_confirmed_at === null) {
+      setDbUser(null);
+      setOnboardingState(null);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('draftpilot_token');
+        localStorage.removeItem('draftpilot_user');
+      }
+      return;
+    }
+
     try {
       // 1. Fetch user & team from server route /api/auth/me
       const res = await fetch(`/api/auth/me?t=${Date.now()}`, {
@@ -211,6 +222,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Check active session on mount
     supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (s?.user && s.user.email_confirmed_at === null) {
+        setSession(null);
+        setUser(null);
+        setDbUser(null);
+        setOnboardingState(null);
+        setIsLoading(false);
+        return;
+      }
       setSession(s);
       setUser(s?.user ?? null);
       if (s) {
@@ -223,6 +242,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
+        if (s?.user && s.user.email_confirmed_at === null) {
+          setSession(null);
+          setUser(null);
+          setDbUser(null);
+          setOnboardingState(null);
+          setIsLoading(false);
+          return;
+        }
         setSession(s);
         setUser(s?.user ?? null);
 
@@ -300,22 +327,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithEmail = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) throw error;
+    if (data?.user && data.user.email_confirmed_at === null) {
+      await supabase.auth.signOut();
+      throw new Error('Email not confirmed. Please check your inbox or click Resend Verification Email.');
+    }
   };
 
   const signUp = async (email: string, password: string, teamName?: string) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const { error } = await supabase.auth.signUp({
-      email,
+      email: email.trim(),
       password,
       options: {
         data: {
           full_name: email.split('@')[0],
           team_name: teamName || `${email.split('@')[0]}'s Team`,
         },
+        emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
       },
     });
     if (error) throw error;
+    await supabase.auth.signOut();
   };
 
   const signOut = async () => {

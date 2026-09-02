@@ -1,27 +1,25 @@
-# E2E Test Infra: OpenRouter Live Diagnostics & Telemetry
+# E2E Test Infra: DraftPilot Super Admin & Auth Hardening
 
 ## Test Philosophy
-- Opaque-box and unit/integration verification of OpenRouter API interaction, key telemetry parsing, multi-category error classification, verbatim error extraction, and fallback draft generation.
-- Automated testing via Node.js native test runner (`node --experimental-strip-types --test`) in `packages/web` and `packages/extension`, Jest in `packages/api`.
+- Opaque-box, requirement-driven. Derived strictly from `ORIGINAL_REQUEST.md` and `PROJECT.md`.
+- Methodology: Category-Partition + Boundary Value Analysis (BVA) + Pairwise Combinatorial Testing + Real-World Workload Testing.
 
-## Feature Inventory Test Mapping
-| # | Feature | Source | Tier 1 (Unit) | Tier 2 (Boundary) | Tier 3 (Cross) | Tier 4 (Scenario) |
-|---|---------|--------|:-------------:|:-----------------:|:--------------:|:-----------------:|
-| 1 | Upstream Error Classification | ORIGINAL_REQUEST §1 | 5 | 5 | ✓ | ✓ |
-| 2 | Verbatim Error Extraction | ORIGINAL_REQUEST §1, §3 | 5 | 5 | ✓ | ✓ |
-| 3 | `/api/v1/auth/key` Telemetry Ingestion | ORIGINAL_REQUEST §2 | 5 | 5 | ✓ | ✓ |
-| 4 | Telemetry Grid Formatting | ORIGINAL_REQUEST §2 | 5 | 5 | ✓ | ✓ |
-| 5 | Verbatim Error & Advisory UI | ORIGINAL_REQUEST §3 | 5 | 5 | ✓ | ✓ |
-| 6 | Grounded Fallback Draft Preview | ORIGINAL_REQUEST §3 | 5 | 5 | ✓ | ✓ |
+## Feature Inventory
+| # | Feature | Source (requirement) | Tier 1 (Min 5) | Tier 2 (Min 5) | Tier 3 (Pairwise) | Tier 4 (Real World) |
+|---|---------|---------------------|:--------------:|:--------------:|:-----------------:|:-------------------:|
+| F1-F4 | User Deletion, Ban Registry, Gateway Interception & 1-Click Restore | ORIGINAL_REQUEST R1 | 5 | 5 | ✓ | ✓ |
+| F5-F8 | Root Passkey Vault, Dynamic Resolution & In-Panel Updater | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ | ✓ |
+| F9-F12 | Mandatory Email Verification, Banner, Login Block & Resend Flow | ORIGINAL_REQUEST R3 | 5 | 5 | ✓ | ✓ |
 
 ## Test Architecture
-- Test runner: `node --experimental-strip-types --test src/lib/__tests__/*.test.ts`
-- Environment: `export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"` and `export HOME="/home/md-roni-ahamed/Test project/.tmp_home"`
-- Test suite path: `packages/web/src/lib/__tests__/openrouter-telemetry.test.ts`
-- Monorepo full runner: `pnpm test`
-- Monorepo production build runner: `pnpm build:web && pnpm build:api && pnpm build:ext`
+- Test Runner: Node 22 native test runner (`node --experimental-strip-types --test`) and Jest for API.
+- Test Files Location: `packages/web/src/lib/__tests__/` and `packages/api/src/`
+- Command to run all tests: `pnpm test`
+- Pass/Fail Semantics: Exit code 0, 100% tests passing, zero uncaught errors.
 
 ## Coverage Thresholds
-- Unit test cases for all 5 error categories (Daily Cap, Concurrency, Congestion, Credits Exhausted, Invalid Key).
-- Boundary tests for telemetry schema: missing label, null limit (unlimited), 0 usage, non-free tier, custom rate limit intervals.
-- Integration tests simulating live `/api/v1/chat/completions` error responses and verifying fallback draft generation.
+- **Tier 1 (Feature Coverage)**: >=5 test cases per major feature area (15+ total).
+- **Tier 2 (Boundary & Corner Cases)**: >=5 test cases per feature area covering case sensitivity, empty inputs, token expiry, multi-tenant boundaries (15+ total).
+- **Tier 3 (Cross-Feature Combinations)**: Pairwise interactions (e.g., banned user attempts password reset, passkey update during active admin session, unverified user attempting AI generation).
+- **Tier 4 (Real-World Application Scenarios)**: Realistic end-to-end admin lifecycle and user registration journeys.
+- **Tier 5 (Adversarial Coverage Hardening)**: Security stress testing, bypass attempts, timing attack resilience, RLS isolation verification.

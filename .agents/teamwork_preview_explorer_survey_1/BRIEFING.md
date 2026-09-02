@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-01T11:55:00+06:00
+# BRIEFING — 2026-09-03T03:02:48+06:00
 
 ## Mission
-Survey the codebase for OpenRouter API integration, /api/v1/chat/completions call flow, error handling, status code parsing, rate limiting/daily caps, and draft generation.
+Investigate Requirement 1: Super Admin User Deletion & Permission Registry (preventing deleted users from using DraftPilot until explicitly restored), mapping existing auth, database schemas/migrations, API routes, middleware, admin dashboard, extension/API access points, AI draft generation interception, and required banned_emails schema.
 
 ## 🔒 My Identity
 - Archetype: explorer
@@ -16,29 +16,35 @@ Survey the codebase for OpenRouter API integration, /api/v1/chat/completions cal
 - Use send_message to report completion back to parent
 
 ## Current Parent
-- Conversation ID: 77b144b3-d815-49ce-a74f-b4ccb4591166
-- Updated: not yet
+- Conversation ID: a250ca04-2f7f-46da-a411-eefa65bc0a47
+- Updated: 2026-09-03T03:02:48+06:00
 
 ## Investigation State
 - **Explored paths**:
+  - `packages/api/supabase/migrations/` (migrations 001 - 006)
   - `packages/web/src/app/api/drafts/generate/route.ts`
-  - `packages/web/src/components/admin/AdminAIConfig.tsx`
-  - `packages/web/src/app/api/admin/ai-config/route.ts`
-  - `packages/api/src/drafts/ai-provider.service.ts`
+  - `packages/web/src/app/api/auth/me/route.ts`
+  - `packages/web/src/app/api/admin/workspaces/route.ts`
+  - `packages/web/src/components/admin/AdminGuard.tsx`
+  - `packages/web/src/components/admin/AdminSidebar.tsx`
+  - `packages/web/src/components/admin/AdminWorkspaces.tsx`
+  - `packages/web/src/components/providers/AuthProvider.tsx`
+  - `packages/web/src/components/AuthForm.tsx`
+  - `packages/api/src/auth/auth.service.ts`
+  - `packages/api/src/auth/auth.guard.ts`
   - `packages/api/src/drafts/drafts.service.ts`
-  - `packages/api/src/drafts/drafts.controller.ts`
   - `packages/extension/src/utils/api-client.ts`
-  - `packages/extension/src/sidepanel/sidepanel.ts`
-  - `packages/web/src/lib/__tests__/ai-pipeline.test.ts`
 - **Key findings**:
-  - OpenRouter upstream `/api/v1/chat/completions` errors in backend routes (`route.ts`, `ai-provider.service.ts`) are caught and gracefully degraded to local 5-intent domain synthesizer with HTTP 200, masking upstream errors from extension users.
-  - In `AdminAIConfig.tsx` playground, 429/credit errors trigger a warning banner that hardcodes a static 50 req/day free-tier explanation without showing the verbatim upstream error message or distinguishing concurrency (20 req/min), provider congestion (503/529), or 401/402 errors.
-  - `handleVerifyKey` queries `https://openrouter.ai/api/v1/auth/key` but ignores available telemetry fields (`usage`, `limit`, `limit_remaining`, `is_free_tier`, `rate_limit`).
-- **Unexplored areas**: None for initial survey.
+  - Outlined complete architectural blueprint for `banned_emails` database table (Migration 007).
+  - Mapped interception points for banned users across sign-up, sign-in, `/dashboard`, and AI draft generation (`/api/drafts/generate`, `DraftsService`, Chrome extension).
+  - Designed Super Admin User Management UI (`AdminUsers.tsx`), sidebar integration (`AdminSidebar.tsx`), and REST API (`/api/admin/users/route.ts`) supporting 1-click permission restoration.
+- **Unexplored areas**: None for Requirement 1 survey.
 
 ## Key Decisions Made
 - Fully documented 5-component handoff report in `.agents/teamwork_preview_explorer_survey_1/handoff.md`.
-- Verified test suite (`pnpm test` -> 64 tests pass) and production builds (`build:web`, `build:api`, `build:ext`).
+- Verified test suite (`pnpm test` -> all tests pass) and production builds (`build:web`, `build:api`, `build:ext`).
 
 ## Artifact Index
-- handoff.md — Complete 5-component survey report
+- handoff.md — Complete 5-component survey report for Requirement 1
+- progress.md — Heartbeat and status tracking
+- DISPATCH.md — Task history

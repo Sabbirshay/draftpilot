@@ -1,22 +1,15 @@
-## 2026-09-01T05:51:35Z
-
-You are Explorer 3 for the initial survey phase.
+## 2026-09-02T21:02:28Z
+You are a teamwork_preview_explorer investigating Requirement 3 (Mandatory Email Verification) and Requirement 4 (Monorepo Build & Test Architecture).
 Your working directory is: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_3
-Project root: /home/md-roni-ahamed/Test project
-Original Request: /home/md-roni-ahamed/Test project/ORIGINAL_REQUEST.md
-
-You MUST read /home/md-roni-ahamed/Test project/ORIGINAL_REQUEST.md first.
+The workspace root is: /home/md-roni-ahamed/Test project
+MANDATORY: Read the user request at /home/md-roni-ahamed/Test project/.agents/ORIGINAL_REQUEST.md before doing anything else.
 
 Task:
-Map the entire monorepo structure (packages/apps), package manager (pnpm), build commands (pnpm build:web, pnpm build:api, pnpm build:ext), test scripts (pnpm test), test infrastructure (Jest/Vitest/Playwright/etc.), existing tests for AI config/OpenRouter, and identify how test suites and production builds are structured and run.
-
-Investigate:
-1. Monorepo structure, root package.json, workspace configuration (pnpm-workspace.yaml or similar).
-2. Existing unit/integration/E2E test files for AdminAIConfig, OpenRouter clients, API routes, and playground.
-3. Build scripts for pnpm build:web, pnpm build:api, pnpm build:ext and their current status/requirements.
-4. Any mock fixtures or test harnesses for OpenRouter API responses and auth/key responses.
-
-Write your findings and evidence chain in:
-/home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_3/handoff.md
-
-When finished, send a brief completion message to your parent.
+1. Map email verification mechanisms, registration (/join), login (/login), and /dashboard entry points.
+2. Inspect Supabase auth configuration/client helpers, unverified user detection (user.email_confirmed_at === null), and resend verification flow.
+3. Map how to display the signup confirmation banner and login warning with the "Resend Verification Email" button.
+4. Inspect monorepo layout: root package.json, pnpm-workspace.yaml, apps/packages structure, test runners, build scripts (pnpm test, pnpm build:web, pnpm build:api, pnpm build:ext).
+5. Document Supabase Auth confirm email setting requirements.
+6. Enumerate all required changes, files to touch, test frameworks available, and interface contracts.
+7. Write a comprehensive, self-contained handoff report to: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_explorer_survey_3/handoff.md
+8. Update your progress.md regularly with timestamps. Send a completion message when done.

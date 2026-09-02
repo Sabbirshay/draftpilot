@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
+import AdminPasskeyVault from './AdminPasskeyVault';
 
 export interface AdminOverviewProps {
   onSelectWorkspaceTab?: () => void;
@@ -220,7 +221,12 @@ export default function AdminOverview({
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          2. MIDDLE SECTION: Live Draft Activity Stream & Architecture
+          2. ROOT PASSKEY VAULT (Dynamic Platform Security)
+      ───────────────────────────────────────────────────────────── */}
+      <AdminPasskeyVault />
+
+      {/* ─────────────────────────────────────────────────────────────
+          3. MIDDLE SECTION: Live Draft Activity Stream & Architecture
       ───────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left-Middle: Live Recent Draft Stream (7 cols) */}

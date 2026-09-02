@@ -1,68 +1,56 @@
-# BRIEFING — 2026-08-31T16:47:18Z
+# BRIEFING — 2026-09-02T21:13:40Z
 
 ## Mission
-Fix Super Admin Security, Guards & Admin Auth Resilience: eliminate passkey unlock deadlock in AdminGuard, ensure sessionStorage persistence, make admin-auth supabaseAdmin resilient against missing SUPABASE_SERVICE_ROLE_KEY, inject passkey header in AdminAIConfig, and fix test import specifiers.
+Implement Milestone 2: Root Passkey Vault & Dynamic Platform Settings, including database migration, dynamic auth resolution with caching and timingSafeEqual comparison, GET/POST passkey API endpoints, frontend AdminPasskeyVault component, AdminOverview integration, and comprehensive automated test suite.
 
 ## 🔒 My Identity
-- Archetype: implementer, qa, specialist
-- Roles: [implementer, qa, specialist]
+- Archetype: teamwork_preview_worker
+- Roles: implementer, qa, specialist
 - Working directory: /home/md-roni-ahamed/Test project/.agents/teamwork_preview_worker_m2
-- Original parent: ef967d89-bd6b-4a07-8a1a-184749ec29df
-- Milestone: Milestone 2 (Super Admin Security, Guards & Admin Auth Resilience)
+- Original parent: a250ca04-2f7f-46da-a411-eefa65bc0a47
+- Milestone: Milestone 2 (Root Passkey Vault & Dynamic Platform Settings)
 
 ## 🔒 Key Constraints
-- Exclusive write ownership:
-  - `packages/web/src/components/admin/AdminGuard.tsx`
-  - `packages/web/src/lib/admin-auth.ts`
-  - `packages/web/src/components/admin/AdminAIConfig.tsx`
-  - `packages/web/src/lib/__tests__/admin-auth.test.ts`
-- Do not cheat, no dummy/facade implementations.
-- Verify with type check, unit test, next build.
-- Produce handoff.md and changes.md in working directory.
+- All implementations must be genuine. No hardcoding or dummy implementations.
+- Write only to exclusive write ownership files.
+- Ensure all tests and builds pass (`pnpm test`, `pnpm build:web`, `pnpm build:api`, `pnpm build:ext`).
 
 ## Current Parent
-- Conversation ID: ef967d89-bd6b-4a07-8a1a-184749ec29df
-- Updated: 2026-08-31T16:47:18Z
+- Conversation ID: a250ca04-2f7f-46da-a411-eefa65bc0a47
+- Updated: 2026-09-02T21:13:40Z
 
 ## Task Summary
 - **What to build**:
-  1. Fix `AdminGuard.tsx` to resolve deadlock when passkey unlocked without Supabase user and ensure sessionStorage persistence.
-  2. Fix `admin-auth.ts` to lazily/resiliently initialize `supabaseAdmin` so missing service key won't throw at import time.
-  3. Fix `AdminAIConfig.tsx` to include `x-admin-passkey` in API fetch requests to `/api/admin/ai-config`.
-  4. Fix `admin-auth.test.ts` import specifier and add comprehensive test cases.
-- **Success criteria**:
-  - `tsc --noEmit -p packages/web/tsconfig.json` passes (0 errors)
-  - `node --experimental-strip-types --test packages/web/src/lib/__tests__/admin-auth.test.ts` passes (8/8 tests pass)
-  - `next build` passes in `packages/web` (10/10 routes generated)
-- **Interface contracts**: PROJECT.md
-- **Code layout**: packages/web/src/
+  1. `packages/api/supabase/migrations/008_platform_settings_root_passkey.sql`: Added `root_passkey TEXT` column to `platform_settings` table.
+  2. `packages/web/src/lib/admin-auth.ts`: Dynamic root passkey resolution querying `platform_settings.root_passkey` with in-memory caching (30s TTL), fallback to env vars (`ADMIN_PASSKEY` / `SUPERADMIN_PASSKEY`), `timingSafeEqual` comparison, cache invalidation `setCachedRootPasskey()`.
+  3. `packages/web/src/app/api/admin/passkey/route.ts`: GET & POST endpoints guarded by `verifySuperAdmin`.
+  4. `packages/web/src/components/admin/AdminPasskeyVault.tsx`: Root Passkey Vault UI component with show/hide toggle, copy with feedback, update form, and `sessionStorage` sync.
+  5. `packages/web/src/components/admin/AdminOverview.tsx`: Integrated `<AdminPasskeyVault />`.
+  6. `packages/web/src/lib/__tests__/admin-passkey-vault.test.ts`: Comprehensive automated test suite (16 tests).
+- **Success criteria**: All 195 unit/integration tests pass across monorepo (`pnpm test`), all package production builds succeed (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`).
 
 ## Change Tracker
 - **Files modified**:
-  - `packages/web/src/components/admin/AdminGuard.tsx`: Resolved passkey unlock deadlock and ensured sessionStorage persistence.
-  - `packages/web/src/lib/admin-auth.ts`: Added resilient fallback for missing SUPABASE_SERVICE_ROLE_KEY and trimmed/env passkey checks.
-  - `packages/web/src/components/admin/AdminAIConfig.tsx`: Injected `x-admin-passkey` into GET and POST requests for `/api/admin/ai-config`.
-  - `packages/web/src/lib/__tests__/admin-auth.test.ts`: Fixed import specifier, added passkey tests and client initialization tests.
-- **Build status**: PASS (TypeScript, Unit Tests, Next.js Production Build)
-- **Pending issues**: None
+  - `packages/api/supabase/migrations/008_platform_settings_root_passkey.sql`: Added `root_passkey TEXT` column.
+  - `packages/web/src/lib/admin-auth.ts`: Dynamic passkey resolution, caching, timingSafeEqual, cache invalidation.
+  - `packages/web/src/app/api/admin/passkey/route.ts`: GET/POST passkey endpoints.
+  - `packages/web/src/components/admin/AdminPasskeyVault.tsx`: Passkey vault component.
+  - `packages/web/src/components/admin/AdminOverview.tsx`: Integrated passkey vault component.
+  - `packages/web/src/lib/__tests__/admin-passkey-vault.test.ts`: Automated test suite.
+- **Build status**: All builds and tests passed (100% green).
+- **Pending issues**: None.
 
 ## Quality Status
-- **Build/test result**: ALL PASS (tsc 0 errors, 8/8 unit tests pass, next build succeeds)
-- **Lint status**: 0 errors
-- **Tests added/modified**: 4 new tests in admin-auth.test.ts (passkey auth, alternative passkeys, invalid passkey fallback, supabaseAdmin initialization)
-
-## Loaded Skills
-- None
+- **Build/test result**: Pass (195 tests pass, 0 fail; build:web, build:api, build:ext exit code 0).
+- **Lint status**: Clean.
+- **Tests added/modified**: `packages/web/src/lib/__tests__/admin-passkey-vault.test.ts` (16 test cases).
 
 ## Key Decisions Made
-- Prioritized `isAdminUnlocked` evaluation before `!user` in `AdminGuard.tsx` so master passkey direct unlock does not get trapped in login prompt.
-- Handled `sessionStorage` restoration in `useEffect(..., [])` unconditionally on mount.
-- Added resilient fallback key in `admin-auth.ts` to prevent runtime crash during module import when service role key is omitted.
-- Injected `x-admin-passkey` in `AdminAIConfig.tsx` to mirror other admin panels.
+- Implemented robust dynamic passkey resolution: DB priority > cache (30s TTL) > ADMIN_PASSKEY > SUPERADMIN_PASSKEY.
+- Integrated `setCachedRootPasskey()` for immediate cache invalidation upon POST updates.
+- Synchronized `sessionStorage.setItem('draftpilot_admin_passkey', newPasskey)` on the client so active browser sessions continue uninterrupted without 401s.
 
 ## Artifact Index
-- DISPATCH.md — Assignment instructions
-- BRIEFING.md — Persistent working memory
-- progress.md — Liveness heartbeat
-- changes.md — Summary of changes
-- handoff.md — 5-component handoff report
+- `.agents/teamwork_preview_worker_m2/DISPATCH.md` — Assignment instructions
+- `.agents/teamwork_preview_worker_m2/progress.md` — Progress tracker
+- `.agents/teamwork_preview_worker_m2/handoff.md` — Final handoff report

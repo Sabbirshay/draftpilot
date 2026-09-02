@@ -587,6 +587,15 @@ export class ApiClient {
           }),
         });
 
+        if (genRes.status === 403) {
+          const genData = await genRes.json().catch(() => ({}));
+          const errorMsg = genData.error || 'Account deactivated. Please contact support.';
+          const banError = new Error(errorMsg);
+          (banError as any).banned = true;
+          (banError as any).status = 403;
+          throw banError;
+        }
+
         if (genRes.ok) {
           const genData = await genRes.json();
           if (genData.draft) {
@@ -594,7 +603,10 @@ export class ApiClient {
             serverSuccess = true;
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.banned || err?.status === 403 || err?.message?.toLowerCase().includes('deactivated')) {
+          throw err;
+        }
         console.warn('Server draft generation fallback:', err);
       }
     }

@@ -18,13 +18,33 @@ export async function GET(req: NextRequest) {
   }
 
   const authUser = authData.user;
-  const email = authUser.email || '';
+  const email = (authUser.email || '').trim().toLowerCase();
   const metadata = authUser.user_metadata || {};
   const fullName = metadata.full_name || metadata.name || email.split('@')[0] || 'User';
   const avatarUrl = metadata.avatar_url || metadata.picture || null;
   const defaultTeamName = metadata.team_name || `${fullName}'s Team`;
 
   try {
+    // 0. Check if user email is present in banned_emails registry
+    if (email) {
+      const { data: bannedEntry } = await supabaseAdmin
+        .from('banned_emails')
+        .select('id, reason')
+        .ilike('email', email)
+        .maybeSingle();
+
+      if (bannedEntry) {
+        return NextResponse.json(
+          {
+            error: 'Account deactivated. Please contact support.',
+            banned: true,
+            reason: bannedEntry.reason || 'Account deactivated by Super Admin',
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // 1. Fetch user from DB
     let { data: existingUser } = await supabaseAdmin
       .from('users')

@@ -1,4 +1,4 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { SupabaseService } from '../config/supabase.service';
 
 @Injectable()
@@ -22,6 +22,19 @@ export class AuthGuard implements CanActivate {
     
     if (error || !data.user) {
       throw new UnauthorizedException('Invalid token');
+    }
+
+    const email = (data.user.email || '').trim().toLowerCase();
+    if (email) {
+      const { data: bannedEntry } = await this.supabase.getClient()
+        .from('banned_emails')
+        .select('id, reason')
+        .ilike('email', email)
+        .maybeSingle();
+
+      if (bannedEntry) {
+        throw new ForbiddenException('Account deactivated. Please contact support.');
+      }
     }
 
     // Fetch user with team and onboarding state

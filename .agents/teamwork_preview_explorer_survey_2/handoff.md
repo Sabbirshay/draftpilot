@@ -1,138 +1,252 @@
-# Survey Report: AdminAIConfig, Key Verification Telemetry, OpenRouter Upstream Response & Playground Diagnostics
+# Handoff Report: Requirement 2 (Root Passkey Viewer & Dynamic Updater)
+
+## Executive Summary
+This investigation surveys the current architecture of Super Admin passkey authentication, admin session management, and `platform_settings` persistence across `packages/web`, `packages/api`, and Supabase migrations. It delivers a comprehensive blueprint for implementing the **Root Passkey Viewer & Dynamic Updater (R2)**, enabling the authenticated Super Admin to view the current root passkey (with Show/Hide toggle), update it dynamically into `platform_settings` without server restarts, and seamlessly maintain active admin sessions.
+
+---
 
 ## 1. Observation
 
-Direct observations from codebase inspection across `packages/web/src/components/admin/AdminAIConfig.tsx`, `packages/web/src/app/api/drafts/generate/route.ts`, `packages/api/src/drafts/ai-provider.service.ts`, and `packages/web/next.config.js`:
-
-### A. Location & Current Implementation of `AdminAIConfig.tsx` and `handleVerifyKey`
-- **File Path**: `/home/md-roni-ahamed/Test project/packages/web/src/components/admin/AdminAIConfig.tsx` (794 lines).
-- **Current `handleVerifyKey` implementation** (lines 187–245):
-  - Validates key prefix (`sk-or-` for OpenRouter, `sk-` for OpenAI).
-  - Sends GET request to `https://openrouter.ai/api/v1/auth/key` with `Authorization: Bearer ${trimmed}`.
-  - Parses `json?.data` and only extracts `json.data.label` (`const label = json.data.label ? \` (\${json.data.label})\` : '';`).
-  - Sets `keyStatus` to `'valid'` and `keyVerifyMessage` to `\Verified & Active\${label}\`.
-  - Discards all balance and quota telemetry (`usage`, `limit`, `is_free_tier`, `rate_limit.requests`, `rate_limit.interval`).
-
-### B. Current State Management in `AdminAIConfig.tsx`
-- **Existing States**:
-  - `provider`: `'openrouter' | 'openai' | 'offline'` (line 46)
-  - `openrouterKey`: `string` (line 49)
-  - `openrouterModel`: `string` (line 50, default `'google/gemma-4-26b-a4b-it:free'`)
-  - `customOpenrouterModel`: `string` (line 51)
-  - `showKey`: `boolean` (line 66)
-  - `keyStatus`: `'untested' | 'testing' | 'valid' | 'invalid'` (line 67)
-  - `keyVerifyMessage`: `string | null` (line 185)
-  - `testThread`: `string` (line 71)
-  - `testResponse`: `string | null` (line 72)
-  - `isTesting`: `boolean` (line 73)
-  - `testMetrics`: `{ tokens: number, latency: number }` (line 74)
-  - `rateLimitWarning`: `string | null` (line 75)
-- **Missing States**:
-  - No state for key telemetry metadata (`telemetry`: `{ label: string, usage: number, limit: number | null, is_free_tier: boolean, rate_limit: { requests: number, interval: string } } | null`).
-  - No state for structured upstream error diagnostics (`upstreamError`: `{ status: number, code?: string, message: string, category: 'daily_cap' | 'rate_limit' | 'congestion' | 'auth_error' | 'credits_exhausted' | 'general' } | null`).
-
-### C. OpenRouter `/api/v1/auth/key` Response Schema
-- **Endpoint**: `GET https://openrouter.ai/api/v1/auth/key`
-- **HTTP 200 OK Schema**:
-  ```json
-  {
-    "data": {
-      "label": "My Key Label",
-      "usage": 0.00,
-      "limit": null,
-      "is_free_tier": true,
-      "rate_limit": {
-        "requests": 20,
-        "interval": "10s"
-      }
+### 1.1 Current Root Passkey Authentication Implementation
+- **File**: `packages/web/src/lib/admin-auth.ts:47-54`
+  ```typescript
+  export async function verifySuperAdmin(req: Request): Promise<AdminAuthResult> {
+    // 1. Check direct server-only admin passkey header (constant-time verification)
+    const passkey = req.headers.get('x-admin-passkey')?.trim();
+    const configuredPasskey = (process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY)?.trim();
+    if (passkey && configuredPasskey && timingSafeEqual(passkey, configuredPasskey)) {
+      return { authorized: true };
     }
-  }
+    // 2. Check Authorization Bearer token ...
   ```
-- **Field Definitions**:
-  - `label`: `string` — User-assigned key label in OpenRouter console.
-  - `usage`: `number` — Cumulative key usage in USD (e.g. `0.0125`).
-  - `limit`: `number | null` — Spending limit cap in USD (`null` represents unlimited).
-  - `is_free_tier`: `boolean` — `true` if account has $0 balance (subject to 50 req/day cap), `false` if credits exist.
-  - `rate_limit`: `{ requests: number, interval: string }` — Burst rate limit (e.g. `20` requests per `"10s"` or `"1m"`).
+  - `verifySuperAdmin` applies cryptographic constant-time comparison via `crypto.timingSafeEqual` (`admin-auth.ts:29-37`).
+  - It currently reads the passkey solely from static process environment variables: `process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY`.
+  - In a long-running Node/Next.js server, environment variables cannot be mutated dynamically without process restarts, meaning passkey updates cannot take effect dynamically unless a persistent database store is checked.
 
-### D. Playground UI, Rate-Limit Banners & Fallback Preview
-- **Current Behavior in `handleTestDraft`** (lines 460–474):
-  - When OpenRouter fails, checks `if (errMsg.includes('Rate limit') || errMsg.includes('credits') || response.status === 429)`.
-  - Sets `rateLimitWarning(errMsg)` and generates offline smart draft via `generateSmartSupportReply(testThread)`.
-- **Current Banner in JSX** (lines 746–759):
-  - Hardcodes header to `"⚠️ OpenRouter Free-Tier Daily Limit Reached (50 reqs/day on $0 balance)"`.
-  - Hardcodes body to `"OpenRouter limits accounts with $0 credit balance to 50 requests/day across all free models..."`.
-  - Does NOT display the verbatim upstream error message from OpenRouter.
-  - Does NOT differentiate between:
-    1. Daily 50 req/day account cap.
-    2. Short-term concurrency/burst rate limit (20 req/min).
-    3. Model queue congestion / upstream 503 provider busy.
-    4. Invalid / unauthenticated API keys (401).
+### 1.2 Admin Session Validation & Storage Across Web
+- **File**: `packages/web/src/components/admin/AdminGuard.tsx:35-41, 53-64`
+  - Unlocked status is checked from `sessionStorage.getItem('draftpilot_admin_unlocked') === 'true'`.
+  - On passkey login or unlock, the passkey is saved to `sessionStorage`:
+    ```typescript
+    sessionStorage.setItem('draftpilot_admin_unlocked', 'true');
+    sessionStorage.setItem('draftpilot_admin_passkey', passkeyClean);
+    setIsAdminUnlocked(true);
+    ```
+- **File**: `packages/web/src/app/admin/login/page.tsx:43-62`
+  - Validates passkey against `/api/admin/metrics` with `x-admin-passkey` header.
+  - On success, sets `sessionStorage.setItem('draftpilot_admin_unlocked', 'true')` and `sessionStorage.setItem('draftpilot_admin_passkey', passkeyClean)`.
+- **File**: Admin UI Components (`AdminOverview.tsx:38-43`, `AdminWorkspaces.tsx:39-44`, `AdminAIConfig.tsx:124-130, 303-310`, `AdminBillingAnalytics.tsx`, `AdminFeatureFlags.tsx`, `AdminGlobalMacros.tsx`)
+  - All admin components extract `sessionStorage.getItem('draftpilot_admin_passkey')` and send it as header `x-admin-passkey` on all `fetch('/api/admin/*')` requests.
+
+### 1.3 Platform Settings Table Schema & Security
+- **File**: `packages/api/supabase/migrations/004_platform_settings.sql:1-14`
+  ```sql
+  CREATE TABLE IF NOT EXISTS platform_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ai_provider TEXT NOT NULL DEFAULT 'openrouter' CHECK (ai_provider IN ('openrouter', 'openai', 'anthropic', 'offline')),
+    openrouter_api_key TEXT,
+    openrouter_model TEXT DEFAULT 'meta-llama/llama-3.1-8b-instruct:free',
+    openai_api_key TEXT,
+    anthropic_api_key TEXT,
+    selected_model TEXT DEFAULT 'meta-llama/llama-3.1-8b-instruct:free',
+    system_prompt TEXT DEFAULT '...',
+    temperature NUMERIC(3,2) DEFAULT 0.4,
+    max_tokens INTEGER DEFAULT 300,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ```
+- **File**: `packages/api/supabase/migrations/005_secure_platform_settings.sql:8-13`
+  - Row Level Security (RLS) is strictly restricted to `service_role` only. Public and anon/authenticated clients cannot read `platform_settings` directly.
+- **Current Limitation**: `platform_settings` does **not** currently have a `root_passkey` column.
+
+### 1.4 Guarded Server API Endpoints
+All existing admin API endpoints under `packages/web/src/app/api/admin/` call `await verifySuperAdmin(req)`:
+1. `GET /api/admin/metrics` (`metrics/route.ts:7-10`)
+2. `GET, POST /api/admin/ai-config` (`ai-config/route.ts:7, 30`)
+3. `GET, PATCH /api/admin/workspaces` (`workspaces/route.ts:7, 65`)
+4. `GET, PATCH /api/admin/billing` (`billing/route.ts:13, 103`)
+5. `GET, POST /api/admin/feature-flags` (`feature-flags/route.ts:112, 126`)
+6. `GET, POST, DELETE /api/admin/global-macros` (`global-macros/route.ts`)
 
 ---
 
 ## 2. Logic Chain
 
-1. **Telemetry Capture**:
-   - `handleVerifyKey` already contacts `https://openrouter.ai/api/v1/auth/key` (line 198) and parses `json.data`.
-   - By capturing the complete `json.data` payload into React state `keyTelemetry`, the UI can immediately display live quota, usage amount, remaining credit limit, rate limit interval, and free-tier status.
+1. **Root Passkey Hierarchy & Dynamic Resolution**:
+   - To allow passkeys to update dynamically without server restarts, the server must resolve the active root passkey by inspecting the persistent database singleton in `platform_settings.root_passkey`.
+   - If `platform_settings.root_passkey` is present and non-empty, it takes precedence as the active dynamic root passkey.
+   - If `platform_settings.root_passkey` is not configured, the server falls back to `process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY`.
+   - If neither DB nor env is configured, passkey authorization is disabled and falls back to Supabase Bearer token verification.
 
-2. **Telemetry Formatting & UI Rendering**:
-   - **Label**: `data.label || 'Default Key'`
-   - **Usage**: `$${data.usage.toFixed(4)}` or `$${data.usage.toFixed(2)}`
-   - **Credit Limit & Remaining**:
-     - If `data.limit !== null`: `$${data.limit.toFixed(2)} Limit` (Remaining: `$${Math.max(0, data.limit - data.usage).toFixed(2)}`)
-     - If `data.limit === null`: `Unlimited`
-   - **Free-Tier Status**:
-     - If `data.is_free_tier`: Amber badge `Free Tier ($0 Balance · 50 req/day cap)`
-     - If `!data.is_free_tier`: Emerald badge `Paid / Active Balance (1,000+ req/day)`
-   - **Rate Limit**: `${data.rate_limit.requests} req / ${data.rate_limit.interval}`
-   - Render these in a dedicated 4-card telemetry grid directly below the API Key input in `AdminAIConfig.tsx`.
+2. **In-Memory Caching with Immediate Cache Invalidation**:
+   - Calling Supabase on every single API request could add latency. An in-memory cache in `admin-auth.ts` (`cachedRootPasskey`, `cachedAt`, TTL: 30s) ensures high throughput (sub-millisecond evaluation).
+   - When a passkey update is requested via `POST /api/admin/passkey`, it writes to `platform_settings` and immediately updates/invalidates the local cache (`setCachedRootPasskey(newPasskey)`).
 
-3. **Verbatim Upstream Error Diagnostics & Guidance**:
-   - In `handleTestDraft`, when `response.ok` is false or no choices are returned:
-     - Extract verbatim upstream error: `data?.error?.message || response.statusText || 'Unknown upstream error'`.
-     - Classify error into actionable categories:
-       - `daily_cap`: "50 reqs/day limit reached on $0 balance. Top up $10 at openrouter.ai/credits to unlock 1,000 free requests/day."
-       - `rate_limit`: "Short-term burst rate limit exceeded. Wait a few seconds before generating another draft."
-       - `congestion`: "Upstream model provider is experiencing high traffic or queue delays. Switch to an alternate free model or custom slug."
-       - `auth_error`: "Invalid OpenRouter API key. Check key in OpenRouter dashboard."
-       - `credits_exhausted`: "Insufficient credits for selected model. Add credits at openrouter.ai/credits."
-   - Render a dedicated advisory banner displaying:
-     - The **Verbatim Upstream Error Message** in a code-formatted snippet.
-     - The **Actionable Resolution Guidance**.
-     - The **High-Fidelity Smart Synthesizer Fallback Preview** with clear labeling (`[⚡ Grounded Offline Synthesizer Fallback Active]`).
+3. **Session Synchronization**:
+   - When a Super Admin updates the root passkey from the UI:
+     - The client sends `POST /api/admin/passkey` with `headers: { 'x-admin-passkey': currentPasskey }` (or active Bearer token).
+     - Upon receiving `200 OK`, the client updates `sessionStorage.setItem('draftpilot_admin_passkey', newPasskey)`.
+     - This guarantees that subsequent API requests in the existing session continue to succeed without 401 Unauthorized errors or requiring re-login.
+
+4. **Super Admin UI / Root Passkey Vault Card**:
+   - The Root Passkey Vault should be presented in the Super Admin Command Center (in `AdminOverview.tsx` and/or `AdminPasskeyVault.tsx`).
+   - The component provides:
+     - Current Passkey display with a Show/Hide toggle (`type="password"` vs `type="text"`).
+     - Copy-to-clipboard button with visual feedback.
+     - New Passkey input field with validation (minimum length 6 characters, trimmed).
+     - Save button that persists to `/api/admin/passkey` and syncs `sessionStorage`.
 
 ---
 
-## 3. Caveats
+## 3. Caveats & Edge Cases
 
-1. **Live External Network Access in Sandbox**: The local build/test sandbox environment restricts live outbound external DNS/HTTP requests (curl returns code 6). Telemetry and OpenRouter calls execute client-side in the user's browser where `connect-src` includes `https://openrouter.ai` and `https://api.openrouter.ai`.
-2. **OpenAI Direct Provider**: When `provider === 'openai'`, key verification calls `https://api.openai.com/v1/models` (OpenAI does not provide usage/balance telemetry on standard key headers via that endpoint). The telemetry grid should be conditionally rendered for `provider === 'openrouter'`.
-3. **Build Environment Settings**: In monorepo builds, `VERCEL=1` is passed to Next.js build (`VERCEL=1 pnpm build:web`) to avoid standalone directory copy issues.
+1. **Security & RLS Integrity**:
+   - `platform_settings` is protected by `005_secure_platform_settings.sql` which enforces `TO service_role` only. Under no circumstances should public/anon SELECT policy be re-introduced. All access must flow through `supabaseAdmin` in server API routes guarded by `verifySuperAdmin`.
+2. **Timing Side-Channel Protection**:
+   - `crypto.timingSafeEqual` must continue to be used for dynamic passkey comparison. Length checks and truthiness validation must occur before calling `timingSafeEqual`.
+3. **Empty / Whitespace String Rejection**:
+   - An attacker attempting to pass `""` or `"   "` when no passkey is set in DB/env must be rejected immediately (`401 Unauthorized`).
+4. **Multi-Tab / Multi-Admin Invalidation**:
+   - If Admin A changes the passkey, Admin B's old passkey in `sessionStorage` will fail on the next request with `401`. `AdminGuard` will catch this and prompt Admin B to enter the new passkey.
 
 ---
 
-## 4. Conclusion
+## 4. Conclusion & Implementation Plan
 
-- Upgrading `handleVerifyKey` requires storing `json.data` in a new React state (`keyTelemetry`) and rendering a 4-metric telemetry grid (Key Label, Usage Amount, Remaining Credit Limit, Rate Limit Interval, Free-Tier Status).
-- Upgrading the playground error handling requires capturing the verbatim upstream OpenRouter response, categorizing the failure (daily cap vs rate limit vs congestion vs auth), displaying actionable resolution guidance, and presenting the immediate grounded fallback draft.
-- All dependencies, monorepo test suites (`pnpm test`), and production builds (`pnpm build:web`, `pnpm build:api`, `pnpm build:ext`) are fully operational and verified.
+### 4.1 Database Migration
+- **File to create**: `packages/api/supabase/migrations/007_platform_settings_root_passkey.sql`
+  ```sql
+  -- Migration 007: Add root_passkey column to platform_settings singleton table
+  ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS root_passkey TEXT;
+  ```
+
+### 4.2 Server Core Library: `packages/web/src/lib/admin-auth.ts`
+- Add dynamic passkey loader and cache:
+  ```typescript
+  let cachedDynamicPasskey: string | null = null;
+  let cacheTimestamp: number = 0;
+  const CACHE_TTL_MS = 30000;
+
+  export function setCachedRootPasskey(passkey: string | null): void {
+    cachedDynamicPasskey = passkey;
+    cacheTimestamp = Date.now();
+  }
+
+  export async function getActiveRootPasskey(): Promise<string | null> {
+    const now = Date.now();
+    if (cachedDynamicPasskey !== null && now - cacheTimestamp < CACHE_TTL_MS) {
+      return cachedDynamicPasskey;
+    }
+
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_settings')
+        .select('root_passkey')
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.root_passkey && typeof data.root_passkey === 'string' && data.root_passkey.trim()) {
+        cachedDynamicPasskey = data.root_passkey.trim();
+        cacheTimestamp = now;
+        return cachedDynamicPasskey;
+      }
+    } catch {
+      // Fall through to environment variables on database query error
+    }
+
+    const envPasskey = (process.env.ADMIN_PASSKEY || process.env.SUPERADMIN_PASSKEY)?.trim() || null;
+    cachedDynamicPasskey = envPasskey;
+    cacheTimestamp = now;
+    return envPasskey;
+  }
+  ```
+- Update `verifySuperAdmin(req: Request)`:
+  ```typescript
+  const passkey = req.headers.get('x-admin-passkey')?.trim();
+  const configuredPasskey = await getActiveRootPasskey();
+  if (passkey && configuredPasskey && timingSafeEqual(passkey, configuredPasskey)) {
+    return { authorized: true };
+  }
+  ```
+
+### 4.3 New Dedicated Server API Route: `packages/web/src/app/api/admin/passkey/route.ts`
+- **GET**:
+  - Validates caller with `await verifySuperAdmin(req)`.
+  - Calls `await getActiveRootPasskey()`.
+  - Returns `NextResponse.json({ success: true, passkey: activePasskey || '' })`.
+- **POST**:
+  - Validates caller with `await verifySuperAdmin(req)`.
+  - Parses body `{ newPasskey: string }`.
+  - Validates: `typeof newPasskey === 'string' && newPasskey.trim().length >= 6`.
+  - Upserts into `platform_settings`:
+    ```typescript
+    const { data: existing } = await supabaseAdmin.from('platform_settings').select('id').limit(1).maybeSingle();
+    const id = existing?.id || crypto.randomUUID();
+    await supabaseAdmin.from('platform_settings').upsert({
+      id,
+      root_passkey: newPasskey.trim(),
+      updated_at: new Date().toISOString()
+    });
+    setCachedRootPasskey(newPasskey.trim());
+    return NextResponse.json({ success: true, message: 'Root passkey updated dynamically in platform_settings' });
+    ```
+
+### 4.4 UI Component: `packages/web/src/components/admin/AdminPasskeyVault.tsx`
+- **Props**: none (self-contained).
+- **State**:
+  - `currentPasskey`: string (fetched from `GET /api/admin/passkey`).
+  - `showCurrentPasskey`: boolean (default `false`).
+  - `newPasskeyInput`: string.
+  - `showNewPasskey`: boolean (default `false`).
+  - `isLoading`: boolean.
+  - `isSaving`: boolean.
+  - `copied`: boolean (temporary 2s state).
+  - `statusMessage`: string | null.
+  - `errorMessage`: string | null.
+- **Card Features**:
+  1. Header with shield icon, "Root Passkey Vault", and "Dynamic & Synced" status badge.
+  2. "Current Active Passkey" field:
+     - Read-only input with masked / unmasked toggle button.
+     - "Copy Passkey" button.
+  3. "Update Root Passkey" form:
+     - Input field with Show/Hide toggle.
+     - "Update & Propagate Passkey" submit button.
+     - On save: updates `sessionStorage.setItem('draftpilot_admin_passkey', newPasskey)` and reloads vault state.
+  4. Security Advisory footer noting immediate effect across all server routes without restart.
+
+### 4.5 Integration in Super Admin Console
+- Include `<AdminPasskeyVault />` in `packages/web/src/components/admin/AdminOverview.tsx` (right column or dedicated section) so it is immediately accessible upon entering `/admin`.
 
 ---
 
 ## 5. Verification Method
 
-1. **Test Suite Execution**:
-   ```bash
-   export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"
-   export HOME="/home/md-roni-ahamed/Test project/.tmp_home"
-   export PNPM_HOME="/home/md-roni-ahamed/Test project/.tmp_home/share/pnpm"
-   pnpm test
-   ```
-2. **Production Builds**:
-   ```bash
-   VERCEL=1 pnpm build:web && pnpm build:api && pnpm build:ext
-   ```
-3. **Code Verification**:
-   - Inspect `packages/web/src/components/admin/AdminAIConfig.tsx` to verify `handleVerifyKey` telemetry parsing, telemetry UI bento cards, verbatim upstream error banner, and fallback draft preview.
+### 5.1 Automated Unit & Integration Tests
+Create test file `packages/web/src/lib/__tests__/admin-passkey-vault.test.ts`:
+1. `GET /api/admin/passkey` requires valid superadmin authorization (returns 401 without auth).
+2. `GET /api/admin/passkey` returns the active root passkey when authorized.
+3. `POST /api/admin/passkey` rejects empty or short passkeys (< 6 chars) with 400 Bad Request.
+4. `POST /api/admin/passkey` updates `platform_settings.root_passkey` and invalidates in-memory cache.
+5. Immediate authorization with the new passkey across all admin routes (`/api/admin/metrics`, `/api/admin/ai-config`, `/api/admin/workspaces`, `/api/admin/billing`, etc.).
+6. Rejection of previous old passkey once updated.
+7. Verification that environment variables (`ADMIN_PASSKEY` / `SUPERADMIN_PASSKEY`) continue to work seamlessly as fallback when DB field is null.
+
+### 5.2 Verification Commands
+Run in workspace root:
+```bash
+export PATH="/home/md-roni-ahamed/Test project/.tools/node/bin:$PATH"
+export HOME="/home/md-roni-ahamed/Test project/.tmp_home"
+export PNPM_HOME="/home/md-roni-ahamed/Test project/.tmp_home/share/pnpm"
+
+# 1. Run all unit test suites
+pnpm test
+
+# 2. Verify web production build
+pnpm build:web
+
+# 3. Verify API production build
+pnpm build:api
+
+# 4. Verify Chrome extension build
+pnpm build:ext
+```
