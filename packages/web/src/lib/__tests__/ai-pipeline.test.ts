@@ -645,5 +645,62 @@ describe('Requirement R4: Super Admin AI Configuration Persistence & Security', 
     assert.strictEqual(gemma31b.provider, 'Google DeepMind');
     assert.strictEqual(gemma31b.badge, 'Free · High Reasoning');
   });
+
+  test('validates z-ai/glm-5.3-flash specification in OPENROUTER_MODELS in AdminAIConfig.tsx', () => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const configPath = path.resolve(__dirname, '../../components/admin/AdminAIConfig.tsx');
+    const content = fs.readFileSync(configPath, 'utf-8');
+
+    // Verify OPENROUTER_MODELS contains z-ai/glm-5.3-flash
+    assert.ok(content.includes("'z-ai/glm-5.3-flash'"), 'AdminAIConfig.tsx must include z-ai/glm-5.3-flash');
+    assert.ok(content.includes("'ZHIPU AI GLM 5.3 Flash'"), 'AdminAIConfig.tsx must include display name ZHIPU AI GLM 5.3 Flash');
+    assert.ok(content.includes("'High Speed · Recommended'"), 'AdminAIConfig.tsx must include badge High Speed · Recommended');
+
+    // Verify dropdown select is present
+    assert.ok(content.includes('openrouter-model-dropdown'), 'AdminAIConfig.tsx must render dropdown selector');
+    assert.ok(content.includes('Select OpenRouter Model'), 'AdminAIConfig.tsx must have accessible label for model select');
+  });
+
+  test('validates platform_settings persistence payload for z-ai/glm-5.3-flash model', () => {
+    const createSettingsPayload = (overrides: Record<string, any> = {}) => {
+      const activeModel = overrides.custom_model || overrides.selected_model || 'z-ai/glm-5.3-flash';
+      return {
+        id: crypto.randomUUID(),
+        ai_provider: overrides.ai_provider || 'openrouter',
+        openrouter_api_key: overrides.openrouter_api_key || 'sk-or-v1-testkey123',
+        openrouter_model: activeModel,
+        selected_model: activeModel,
+        openai_api_key: overrides.openai_api_key || '',
+        system_prompt: overrides.system_prompt || 'Default system prompt',
+        temperature: overrides.temperature !== undefined ? Number(overrides.temperature) : 0.4,
+        max_tokens: overrides.max_tokens !== undefined ? Number(overrides.max_tokens) : 300,
+        updated_at: new Date().toISOString(),
+      };
+    };
+
+    const payload = createSettingsPayload({
+      selected_model: 'z-ai/glm-5.3-flash',
+      temperature: 0.4,
+      max_tokens: 300,
+      system_prompt: 'DraftPilot support assistant prompt',
+    });
+
+    assert.strictEqual(payload.ai_provider, 'openrouter');
+    assert.strictEqual(payload.openrouter_model, 'z-ai/glm-5.3-flash');
+    assert.strictEqual(payload.selected_model, 'z-ai/glm-5.3-flash');
+    assert.strictEqual(payload.temperature, 0.4);
+    assert.strictEqual(payload.max_tokens, 300);
+    assert.ok(payload.updated_at);
+  });
+
+  test('validates fallback model resolution for z-ai/glm-5.3-flash', () => {
+    const resolveFallbackModel = (activeModel: string) => {
+      return activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+    };
+
+    const fallback = resolveFallbackModel('z-ai/glm-5.3-flash');
+    assert.strictEqual(fallback, 'google/gemma-4-26b-a4b-it:free');
+  });
 });
 

@@ -79,7 +79,25 @@ CRITICAL INSTRUCTIONS:
       const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
 
       try {
-        // 1. Try Primary Model (with 8s timeout)
+        const isReasoningMandatory = (model: string) =>
+          model.includes('glm-5.3') || model.includes('o1') || model.includes('o3');
+
+        const primaryBody: any = {
+          model: activeModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: maxTokens,
+          temperature: temp,
+        };
+        if (!isReasoningMandatory(activeModel)) {
+          primaryBody.include_reasoning = false;
+          primaryBody.reasoning = { max_tokens: 0 };
+        }
+
+        // 1. Try Primary Model (with dynamic timeout based on model type)
+        const primaryTimeoutMs = isReasoningMandatory(activeModel) ? 20000 : 8000;
         let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -88,25 +106,30 @@ CRITICAL INSTRUCTIONS:
             'HTTP-Referer': 'https://draftpilot-web.vercel.app',
             'X-Title': 'DraftPilot'
           },
-          body: JSON.stringify({
-            model: activeModel,
+          body: JSON.stringify(primaryBody),
+          signal: AbortSignal.timeout(primaryTimeoutMs)
+        });
+
+        let data = await response.json().catch(() => null) as any;
+
+        // 2. If Primary fails, attempt Automatic Fallback Model
+        if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
+          this.logger.warn(`Primary model ${activeModel} failed (${response.status}). Attempting auto-fallback to ${fallbackModel}...`);
+          const fallbackBody: any = {
+            model: fallbackModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: prompt }
             ],
             max_tokens: maxTokens,
             temperature: temp,
-            include_reasoning: false,
-            reasoning: { max_tokens: 0 }
-          }),
-          signal: AbortSignal.timeout(8000)
-        });
+          };
+          if (!isReasoningMandatory(fallbackModel)) {
+            fallbackBody.include_reasoning = false;
+            fallbackBody.reasoning = { max_tokens: 0 };
+          }
 
-        let data = await response.json().catch(() => null) as any;
-
-        // 2. If Primary fails, attempt Automatic Fallback Model (with 8s timeout)
-        if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
-          this.logger.warn(`Primary model ${activeModel} failed (${response.status}). Attempting auto-fallback to ${fallbackModel}...`);
+          const fallbackTimeoutMs = isReasoningMandatory(fallbackModel) ? 20000 : 8000;
           const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -115,18 +138,8 @@ CRITICAL INSTRUCTIONS:
               'HTTP-Referer': 'https://draftpilot-web.vercel.app',
               'X-Title': 'DraftPilot'
             },
-            body: JSON.stringify({
-              model: fallbackModel,
-              messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: prompt }
-              ],
-              max_tokens: maxTokens,
-              temperature: temp,
-              include_reasoning: false,
-              reasoning: { max_tokens: 0 }
-            }),
-            signal: AbortSignal.timeout(8000)
+            body: JSON.stringify(fallbackBody),
+            signal: AbortSignal.timeout(fallbackTimeoutMs)
           });
 
           const fallbackData = await fallbackRes.json().catch(() => null) as any;

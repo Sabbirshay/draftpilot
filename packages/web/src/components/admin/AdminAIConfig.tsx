@@ -10,6 +10,13 @@ export const OPENROUTER_FREE_MODELS = [
   { id: 'z-ai/glm-5.2:free', name: 'ZHIPU AI GLM 5.2', provider: 'ZHIPU AI', badge: 'Free · Bilingual' },
 ];
 
+export const OPENROUTER_MODELS = [
+  ...OPENROUTER_FREE_MODELS,
+  { id: 'z-ai/glm-5.3-flash', name: 'ZHIPU AI GLM 5.3 Flash', provider: 'ZHIPU AI', badge: 'High Speed · Recommended' },
+];
+
+export const OPENROUTER_MODEL_LIST = OPENROUTER_MODELS;
+
 function generateSmartSupportReply(inquiry: string, customerName = 'there'): string {
   const lower = inquiry.toLowerCase();
   
@@ -160,7 +167,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           if (data.openrouter_model) {
             setOpenrouterModel(data.openrouter_model);
             localStorage.setItem('draftpilot_openrouter_model', data.openrouter_model);
-            if (!OPENROUTER_FREE_MODELS.find((m) => m.id === data.openrouter_model)) {
+            if (!OPENROUTER_MODELS.find((m) => m.id === data.openrouter_model)) {
               setCustomOpenrouterModel(data.openrouter_model);
               localStorage.setItem('draftpilot_custom_model', data.openrouter_model);
             }
@@ -369,7 +376,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
             { role: 'user', content: testThread },
           ],
           temperature: temperature,
-          max_tokens: maxTokens,
+          max_tokens: activeModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
         }),
       });
 
@@ -393,7 +400,7 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
               { role: 'user', content: testThread },
             ],
             temperature: temperature,
-            max_tokens: maxTokens,
+            max_tokens: fallbackModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
           }),
         });
 
@@ -671,18 +678,48 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         <div className="p-6 rounded-3xl bg-elevated/70 border border-border/80 shadow-lg space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-text">Choose OpenRouter Free Model</h3>
+              <h3 className="text-sm font-bold text-text">Choose OpenRouter Model</h3>
               <p className="text-xs text-text-dim">
                 Active model: <strong className="text-accent-light font-mono">{customOpenrouterModel || openrouterModel}</strong>
               </p>
             </div>
             <span className="text-xs text-emerald-400 font-mono font-semibold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-              100% Free Tiers Available
+              High Speed &amp; Free Tiers Available
             </span>
           </div>
 
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            {OPENROUTER_FREE_MODELS.map((m) => {
+          {/* Model Dropdown Selector */}
+          <div>
+            <label htmlFor="openrouter-model-dropdown" className="block text-xs font-semibold text-text-dim mb-1.5">
+              Select Model from Dropdown:
+            </label>
+            <select
+              id="openrouter-model-dropdown"
+              aria-label="Select OpenRouter Model"
+              value={customOpenrouterModel ? '' : openrouterModel}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setOpenrouterModel(e.target.value);
+                  setCustomOpenrouterModel('');
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('draftpilot_openrouter_model', e.target.value);
+                    localStorage.removeItem('draftpilot_custom_model');
+                  }
+                }
+              }}
+              className="w-full md:w-2/3 px-3 py-2.5 rounded-xl bg-bg border border-border focus:border-accent text-xs font-mono text-text outline-none cursor-pointer"
+            >
+              {OPENROUTER_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.provider}) — {m.badge}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Model Cards Grid */}
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {OPENROUTER_MODELS.map((m) => {
               const isSelected = openrouterModel === m.id && !customOpenrouterModel;
               return (
                 <div
