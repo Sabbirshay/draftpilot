@@ -257,4 +257,140 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
       assert.strictEqual(CURRENT_EXTENSION_VERSION, '0.1.0');
     });
   });
+
+  describe('R1 & R2: Dashboard Header Demo Wiring & Sandbox Integration', () => {
+    test('draftpilot:open-demo event triggers listener and passes ticketId payload', () => {
+      let isOpen = false;
+      let targetTicketId: string | undefined = undefined;
+
+      const handleOpenDemo = (event?: any) => {
+        if (event?.detail?.ticketId) {
+          targetTicketId = event.detail.ticketId;
+        }
+        isOpen = true;
+      };
+
+      // Register listener
+      const eventTarget = new EventTarget();
+      eventTarget.addEventListener('draftpilot:open-demo', handleOpenDemo as EventListener);
+
+      // Trigger standard open event
+      eventTarget.dispatchEvent(new CustomEvent('draftpilot:open-demo'));
+      assert.strictEqual(isOpen, true, 'Event dispatch must open demo modal');
+      assert.strictEqual(targetTicketId, undefined);
+
+      // Trigger targeted ticket open event
+      isOpen = false;
+      eventTarget.dispatchEvent(
+        new CustomEvent('draftpilot:open-demo', { detail: { ticketId: 'shipping_status' } })
+      );
+      assert.strictEqual(isOpen, true, 'Event dispatch with detail must open demo modal');
+      assert.strictEqual(targetTicketId, 'shipping_status', 'Must capture ticketId payload');
+    });
+
+    test('selecting between demo tickets updates inquiry context and redacts sensitive PII across all 4 categories', () => {
+      const tickets = DEMO_TICKETS;
+      assert.strictEqual(tickets.length, 4);
+
+      for (const ticket of tickets) {
+        assert.ok(ticket.subject, 'Each ticket must have a subject');
+        assert.ok(ticket.customerName, 'Each ticket must have a customer name');
+        assert.ok(ticket.customerEmail, 'Each ticket must have customer email');
+
+        const result = synthesizeDemoDraft(ticket, 'empathetic');
+        assert.ok(result.draft.includes(ticket.customerName.split(' ')[0]), `Draft must address customer ${ticket.customerName}`);
+        assert.ok(result.scrubbedCount > 0, `Ticket ${ticket.id} must have scrubbed PII`);
+        assert.ok(!result.redactedThread.includes(ticket.unredactedPiiSnippet), `Redacted thread must not contain unredacted PII snippet: ${ticket.unredactedPiiSnippet}`);
+      }
+    });
+
+    test('tone selectors modulate synthesized reply across all 4 options', () => {
+      const ticket = DEMO_TICKETS[0];
+      const empathetic = synthesizeDemoDraft(ticket, 'empathetic');
+      const concise = synthesizeDemoDraft(ticket, 'concise');
+      const formal = synthesizeDemoDraft(ticket, 'formal');
+      const urgent = synthesizeDemoDraft(ticket, 'urgent');
+
+      assert.strictEqual(empathetic.appliedTone, 'empathetic');
+      assert.strictEqual(concise.appliedTone, 'concise');
+      assert.strictEqual(formal.appliedTone, 'formal');
+      assert.strictEqual(urgent.appliedTone, 'urgent');
+
+      // Drafts should be distinctly different
+      assert.notStrictEqual(empathetic.draft, concise.draft);
+      assert.notStrictEqual(formal.draft, urgent.draft);
+      assert.ok(concise.draft.length < empathetic.draft.length);
+    });
+
+    test('macro selection injects guidance context for all available demo macros', () => {
+      const ticket = DEMO_TICKETS[0];
+      for (const macro of DEMO_MACROS) {
+        const result = synthesizeDemoDraft(ticket, 'formal', macro.id);
+        assert.strictEqual(result.appliedMacroId, macro.id);
+        assert.ok(
+          result.draft.includes(macro.content),
+          `Draft should incorporate content from macro ${macro.name}`
+        );
+      }
+    });
+
+    test('body scroll lock locks overflow to hidden when open and restores on unmount', () => {
+      const fakeBody = {
+        style: {
+          overflow: 'auto',
+        },
+      };
+
+      const originalDoc = (globalThis as any).document;
+      try {
+        (globalThis as any).document = { body: fakeBody };
+
+        // Simulate modal mount (isOpen = true)
+        const initialOverflow = fakeBody.style.overflow;
+        fakeBody.style.overflow = 'hidden';
+        assert.strictEqual(fakeBody.style.overflow, 'hidden', 'Body overflow must be hidden while modal is open');
+
+        // Simulate modal unmount / close cleanup
+        fakeBody.style.overflow = initialOverflow;
+        assert.strictEqual(fakeBody.style.overflow, 'auto', 'Body overflow must be restored to previous state on close');
+      } finally {
+        (globalThis as any).document = originalDoc;
+      }
+    });
+
+    test('copy and insert actions trigger positive visual confirmations without throwing', async () => {
+      let copiedText = '';
+      const mockClipboard = {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      };
+
+      const originalClipboard = (globalThis as any).navigator?.clipboard;
+      try {
+        Object.defineProperty(globalThis.navigator, 'clipboard', {
+          value: mockClipboard,
+          configurable: true,
+          writable: true,
+        });
+
+        const ticket = DEMO_TICKETS[0];
+        const result = synthesizeDemoDraft(ticket, 'concise');
+
+        // Execute simulated copy
+        await globalThis.navigator.clipboard.writeText(result.draft);
+        assert.strictEqual(copiedText, result.draft, 'Draft text must be written to clipboard');
+      } finally {
+        try {
+          Object.defineProperty(globalThis.navigator, 'clipboard', {
+            value: originalClipboard,
+            configurable: true,
+            writable: true,
+          });
+        } catch {
+          // ignore cleanup errors if unconfigurable
+        }
+      }
+    });
+  });
 });

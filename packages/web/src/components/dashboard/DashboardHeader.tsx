@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import DateRangePicker, { DateRangeState } from './DateRangePicker';
 import NotificationCenter from './NotificationCenter';
 import HelpSupportCenter from './HelpSupportCenter';
+import TryDemoModeModal from './TryDemoModeModal';
 import { useAuth } from '@/components/providers/AuthProvider';
 
 export type DashboardTab = 'overview' | 'macros' | 'team' | 'billing' | 'gmail' | 'settings';
@@ -45,7 +46,24 @@ export default function DashboardHeader({
     null;
   const teamName = dbUser?.teams?.name || `${fullName}'s Team`;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
+  const [demoTicketId, setDemoTicketId] = useState<string | undefined>(undefined);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Listen for global draftpilot:open-demo custom events to open the interactive sandbox
+  useEffect(() => {
+    const handleOpenDemo = (event?: Event) => {
+      const customEvent = event as CustomEvent<{ ticketId?: string }> | undefined;
+      if (customEvent?.detail?.ticketId) {
+        setDemoTicketId(customEvent.detail.ticketId);
+      }
+      setIsDemoModalOpen(true);
+    };
+    window.addEventListener('draftpilot:open-demo', handleOpenDemo);
+    return () => {
+      window.removeEventListener('draftpilot:open-demo', handleOpenDemo);
+    };
+  }, []);
 
   // Close profile dropdown on click outside
   useEffect(() => {
@@ -147,10 +165,9 @@ export default function DashboardHeader({
           <button
             type="button"
             onClick={() => {
+              setIsDemoModalOpen(true);
               if (onTryDemoClick) {
                 onTryDemoClick();
-              } else if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('draftpilot:open-demo'));
               }
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-accent/20 to-cyan/20 hover:from-accent/30 hover:to-cyan/30 border border-accent/40 text-text text-xs font-semibold transition-all shadow-[0_0_12px_rgba(124,58,237,0.25)] cursor-pointer"
@@ -289,6 +306,13 @@ export default function DashboardHeader({
           </div>
         </div>
       )}
+
+      {/* Interactive Try Demo Mode Modal */}
+      <TryDemoModeModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+        initialTicketId={demoTicketId}
+      />
     </div>
   );
 }

@@ -33,6 +33,23 @@ export default function TryDemoModeModal({
 
   const currentTicket = DEMO_TICKETS.find((t) => t.id === selectedTicketId) || DEMO_TICKETS[0];
 
+  // Sync initialTicketId if provided prop changes
+  useEffect(() => {
+    if (isOpen && initialTicketId) {
+      setSelectedTicketId(initialTicketId);
+    }
+  }, [isOpen, initialTicketId]);
+
+  // Lock body scroll when modal is open and restore cleanly on close
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
   // Helper to trigger generation
   const handleGenerate = (ticket: DemoTicket, tone: string, macroId?: string) => {
     setIsGenerating(true);
@@ -63,8 +80,10 @@ export default function TryDemoModeModal({
   }, [isOpen, onClose]);
 
   const handleCopy = () => {
-    if (draftResult && typeof navigator !== 'undefined') {
-      navigator.clipboard.writeText(draftResult.draft);
+    if (draftResult) {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(draftResult.draft).catch(() => {});
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -99,8 +118,13 @@ export default function TryDemoModeModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto"
+        onClick={onClose}
+        data-testid="demo-modal-backdrop"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}

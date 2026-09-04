@@ -115,6 +115,9 @@ export default function DashboardPage() {
           onAddMacroClick={handleAddMacro}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
+          onTryDemoClick={() => {
+            updateOnboardingFlag?.({ viewed_demo: true });
+          }}
         />
 
         {/* Tab Content Display */}
