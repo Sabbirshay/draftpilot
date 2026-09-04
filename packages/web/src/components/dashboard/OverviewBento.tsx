@@ -56,11 +56,20 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
         setMacrosCount(macroCount);
       }
 
-      // 3. Count draft history
-      const { count: draftCount } = await supabase
+      // 3. Count draft history (filtered by dateRange if provided)
+      let draftQuery = supabase
         .from('draft_history')
         .select('*', { count: 'exact', head: true })
         .eq('team_id', teamId);
+
+      if (dateRange?.startDate) {
+        draftQuery = draftQuery.gte('created_at', `${dateRange.startDate}T00:00:00.000Z`);
+      }
+      if (dateRange?.endDate) {
+        draftQuery = draftQuery.lte('created_at', `${dateRange.endDate}T23:59:59.999Z`);
+      }
+
+      const { count: draftCount } = await draftQuery;
 
       if (draftCount !== null) {
         setDraftsCount(draftCount);
@@ -70,7 +79,7 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
     } finally {
       setLoadingStats(false);
     }
-  }, [dbUser, user]);
+  }, [dbUser, user, dateRange?.startDate, dateRange?.endDate]);
 
   // Initial fetch and Supabase Realtime Channels
   useEffect(() => {

@@ -24,7 +24,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "*://mail.google.com/*"
+    "*://mail.google.com/*",
+    "http://localhost/*",
+    "https://*.vercel.app/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -34,6 +36,17 @@
       "matches": ["*://mail.google.com/*"],
       "js": ["gmail-detector.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://localhost:*/*",
+        "http://127.0.0.1/*",
+        "http://127.0.0.1:*/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": ["web-handshake.js"],
+      "run_at": "document_start"
     }
   ],
   "side_panel": {

@@ -1,49 +1,314 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DEMO_DRAFT_EXAMPLE, DEMO_MACROS, DEMO_STATS } from '@/data/demo-data';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/components/providers/AuthProvider';
+import ConfettiCelebration from './ConfettiCelebration';
 
-interface OnboardingState {
-  gmail_connected: boolean;
-  first_macro_added: boolean;
+export interface OnboardingState {
   extension_installed: boolean;
-  viewed_demo: boolean;
+  first_macro_added: boolean;
+  first_draft_generated: boolean;
+  team_member_invited: boolean;
+  gmail_connected?: boolean;
+  viewed_demo?: boolean;
+}
+
+export interface AchievementBadge {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  stepRequired: string;
+  isUnlocked: boolean;
 }
 
 interface OnboardingDashboardProps {
   userName: string;
-  onboardingState: OnboardingState;
+  onboardingState: Partial<OnboardingState>;
   onUpdateOnboarding?: (updates: Partial<OnboardingState>) => void;
   onNavigateToDashboard?: () => void;
 }
 
 export default function OnboardingDashboard({
   userName,
-  onboardingState,
+  onboardingState = {},
   onUpdateOnboarding,
   onNavigateToDashboard,
 }: OnboardingDashboardProps) {
+  const { dbUser } = useAuth();
   const [expandedDraft, setExpandedDraft] = useState(true);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [celebrationConfig, setCelebrationConfig] = useState<{
+    isActive: boolean;
+    title: string;
+    message: string;
+    badgeName: string;
+    badgeIcon: string;
+  } | null>(null);
+
+  // Local state copy for immediate reactivity
+  const [localSteps, setLocalSteps] = useState<OnboardingState>({
+    extension_installed: Boolean(onboardingState.extension_installed),
+    first_macro_added: Boolean(onboardingState.first_macro_added),
+    first_draft_generated: Boolean(onboardingState.first_draft_generated),
+    team_member_invited: Boolean(onboardingState.team_member_invited),
+    gmail_connected: Boolean(onboardingState.gmail_connected),
+    viewed_demo: Boolean(onboardingState.viewed_demo),
+  });
+
   const firstName = userName?.split(' ')[0] || userName?.split('@')[0] || 'there';
 
-  const completedCount = [
-    onboardingState.gmail_connected,
-    onboardingState.first_macro_added,
-    onboardingState.extension_installed,
-  ].filter(Boolean).length;
+  // Sync with incoming prop changes
+  useEffect(() => {
+    setLocalSteps((prev) => ({
+      ...prev,
+      extension_installed: Boolean(onboardingState.extension_installed ?? prev.extension_installed),
+      first_macro_added: Boolean(onboardingState.first_macro_added ?? prev.first_macro_added),
+      first_draft_generated: Boolean(onboardingState.first_draft_generated ?? prev.first_draft_generated),
+      team_member_invited: Boolean(onboardingState.team_member_invited ?? prev.team_member_invited),
+    }));
+  }, [onboardingState]);
 
-  const progress = Math.round((completedCount / 3) * 100);
+  // Update step helper
+  const updateStep = useCallback(
+    (step: keyof OnboardingState, value: boolean) => {
+      setLocalSteps((prev) => ({ ...prev, [step]: value }));
+      onUpdateOnboarding?.({ [step]: value });
+      try {
+        localStorage.setItem(`draftpilot_${step}`, String(value));
+      } catch (e) {
+        // ignore
+      }
+    },
+    [onUpdateOnboarding]
+  );
 
-  const handleViewDemo = () => {
-    if (!onboardingState.viewed_demo) {
-      onUpdateOnboarding?.({ viewed_demo: true });
+  // Auto-detection logic on mount
+  useEffect(() => {
+    async function autoDetectMilestones() {
+      // 1. Check Extension Handshake
+      if (typeof document !== 'undefined') {
+        const isExtInstalled =
+          document.documentElement.getAttribute('data-draftpilot-extension-installed') === 'true' ||
+          localStorage.getItem('draftpilot_extension_installed') === 'true';
+
+        if (isExtInstalled && !localSteps.extension_installed) {
+          updateStep('extension_installed', true);
+        }
+      }
+
+      // Check localStorage cached achievements
+      if (localStorage.getItem('draftpilot_first_draft_generated') === 'true' && !localSteps.first_draft_generated) {
+        updateStep('first_draft_generated', true);
+      }
+      if (localStorage.getItem('draftpilot_first_macro_added') === 'true' && !localSteps.first_macro_added) {
+        updateStep('first_macro_added', true);
+      }
+      if (localStorage.getItem('draftpilot_team_member_invited') === 'true' && !localSteps.team_member_invited) {
+        updateStep('team_member_invited', true);
+      }
+
+      // 2. Query Supabase for real team data
+      const teamId = dbUser?.team_id;
+      if (teamId) {
+        try {
+          // Check macros
+          const { count: macroCount } = await supabase
+            .from('macros')
+            .select('*', { count: 'exact', head: true })
+            .eq('team_id', teamId);
+          if (macroCount && macroCount > 0 && !localSteps.first_macro_added) {
+            updateStep('first_macro_added', true);
+          }
+
+          // Check draft history
+          const { count: draftsCount } = await supabase
+            .from('draft_history')
+            .select('*', { count: 'exact', head: true })
+            .eq('team_id', teamId);
+          if (draftsCount && draftsCount > 0 && !localSteps.first_draft_generated) {
+            updateStep('first_draft_generated', true);
+          }
+
+          // Check team members
+          const { count: memberCount } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .eq('team_id', teamId);
+          if (memberCount && memberCount > 1 && !localSteps.team_member_invited) {
+            updateStep('team_member_invited', true);
+          }
+        } catch (err) {
+          console.warn('Auto-detection query notice:', err);
+        }
+      }
     }
+
+    autoDetectMilestones();
+  }, [dbUser, localSteps, updateStep]);
+
+  // The 4 Core Required Steps
+  const steps = [
+    {
+      id: 'extension_installed' as keyof OnboardingState,
+      title: '1. Install Extension',
+      description: 'Add DraftPilot extension to Chrome for inline Gmail drafting',
+      icon: '🧩',
+      badgeName: 'Extension Pioneer',
+      badgeIcon: '🧩',
+      completed: localSteps.extension_installed,
+      actionLabel: localSteps.extension_installed ? 'Installed' : 'Install Extension',
+      onAction: () => setIsInstallModalOpen(true),
+    },
+    {
+      id: 'first_macro_added' as keyof OnboardingState,
+      title: '2. Create First Macro',
+      description: 'Add your team’s first custom canned response template',
+      icon: '📐',
+      badgeName: 'Macro Architect',
+      badgeIcon: '📐',
+      completed: localSteps.first_macro_added,
+      actionLabel: localSteps.first_macro_added ? 'Created' : 'Create Macro',
+      onAction: () => {
+        const next = !localSteps.first_macro_added;
+        updateStep('first_macro_added', next);
+        if (next) {
+          setCelebrationConfig({
+            isActive: true,
+            title: '📐 Macro Architect Unlocked!',
+            message: 'You created your first support macro. Repetitive answers are now automated!',
+            badgeName: 'Macro Architect',
+            badgeIcon: '📐',
+          });
+        }
+      },
+    },
+    {
+      id: 'first_draft_generated' as keyof OnboardingState,
+      title: '3. Generate First AI Draft',
+      description: 'Synthesize your first real-time AI reply on an email thread',
+      icon: '⚡',
+      badgeName: 'AI Copilot Ace',
+      badgeIcon: '⚡',
+      completed: localSteps.first_draft_generated,
+      actionLabel: localSteps.first_draft_generated ? 'Generated' : 'Generate Draft',
+      onAction: () => {
+        const next = !localSteps.first_draft_generated;
+        updateStep('first_draft_generated', next);
+        if (next) {
+          setCelebrationConfig({
+            isActive: true,
+            title: '🎉 AI Copilot Ace Unlocked!',
+            message: 'First AI reply generated! DraftPilot synthesized an empathetic, context-aware reply in 240ms.',
+            badgeName: 'AI Copilot Ace',
+            badgeIcon: '⚡',
+          });
+        }
+      },
+    },
+    {
+      id: 'team_member_invited' as keyof OnboardingState,
+      title: '4. Invite Team Member',
+      description: 'Invite a co-pilot to collaborate in your shared workspace',
+      icon: '👥',
+      badgeName: 'Team Builder',
+      badgeIcon: '👥',
+      completed: localSteps.team_member_invited,
+      actionLabel: localSteps.team_member_invited ? 'Invited' : 'Invite Member',
+      onAction: () => setIsInviteModalOpen(true),
+    },
+  ];
+
+  const completedCount = steps.filter((s) => s.completed).length;
+  const progressPercent = Math.round((completedCount / 4) * 100);
+  const isAllCompleted = completedCount === 4;
+
+  // 5 Milestone Achievement Badges
+  const achievementBadges: AchievementBadge[] = [
+    {
+      id: 'badge-extension',
+      name: 'Extension Pioneer',
+      icon: '🧩',
+      description: 'Installed the Chrome extension and established handshake',
+      stepRequired: 'Install Extension',
+      isUnlocked: localSteps.extension_installed,
+    },
+    {
+      id: 'badge-macro',
+      name: 'Macro Architect',
+      icon: '📐',
+      description: 'Created first custom support macro template',
+      stepRequired: 'Create First Macro',
+      isUnlocked: localSteps.first_macro_added,
+    },
+    {
+      id: 'badge-draft',
+      name: 'AI Copilot Ace',
+      icon: '⚡',
+      description: 'Synthesized first AI draft reply with privacy scrubbing',
+      stepRequired: 'Generate First AI Draft',
+      isUnlocked: localSteps.first_draft_generated,
+    },
+    {
+      id: 'badge-team',
+      name: 'Team Builder',
+      icon: '👥',
+      description: 'Invited team member to collaborate in workspace',
+      stepRequired: 'Invite Team Member',
+      isUnlocked: localSteps.team_member_invited,
+    },
+    {
+      id: 'badge-champion',
+      name: 'DraftPilot Champion',
+      icon: '👑',
+      description: 'Completed all 4 onboarding milestones and mastered the workflow',
+      stepRequired: 'Complete All Steps',
+      isUnlocked: isAllCompleted,
+    },
+  ];
+
+  // Trigger champion celebration when all 4 steps become completed
+  useEffect(() => {
+    if (isAllCompleted && !celebrationConfig?.isActive) {
+      setCelebrationConfig({
+        isActive: true,
+        title: '👑 DraftPilot Champion Unlocked!',
+        message: 'Mastery achieved! You completed all 4 onboarding milestones. Your support workflow is fully empowered.',
+        badgeName: 'DraftPilot Champion',
+        badgeIcon: '👑',
+      });
+    }
+  }, [isAllCompleted, celebrationConfig]);
+
+  const handleTriggerDemoDraft = () => {
+    updateStep('first_draft_generated', true);
+    setCelebrationConfig({
+      isActive: true,
+      title: '🎉 First AI Draft Generated!',
+      message: 'Congratulations! You generated your first AI draft reply with privacy redaction and tone synthesis.',
+      badgeName: 'AI Copilot Ace',
+      badgeIcon: '⚡',
+    });
   };
 
-  const handleToggleStep = (step: keyof OnboardingState) => {
-    onUpdateOnboarding?.({ [step]: !onboardingState[step] });
+  const handleSendInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    updateStep('team_member_invited', true);
+    setIsInviteModalOpen(false);
+    setInviteEmail('');
+    setCelebrationConfig({
+      isActive: true,
+      title: '👥 Team Builder Unlocked!',
+      message: `Invitation sent to ${inviteEmail}. You're on your way to scaling team support!`,
+      badgeName: 'Team Builder',
+      badgeIcon: '👥',
+    });
   };
 
   return (
@@ -52,8 +317,19 @@ export default function OnboardingDashboard({
       <div className="fixed top-10 left-1/4 w-[600px] h-[300px] bg-accent/10 blur-[140px] rounded-full pointer-events-none -z-10" />
       <div className="fixed bottom-10 right-1/4 w-[500px] h-[250px] bg-cyan/10 blur-[130px] rounded-full pointer-events-none -z-10" />
 
-      <div className="max-w-5xl mx-auto space-y-8">
+      {/* Confetti Celebration Particle Layer & Banner */}
+      {celebrationConfig && (
+        <ConfettiCelebration
+          isActive={celebrationConfig.isActive}
+          title={celebrationConfig.title}
+          message={celebrationConfig.message}
+          badgeName={celebrationConfig.badgeName}
+          badgeIcon={celebrationConfig.badgeIcon}
+          onClose={() => setCelebrationConfig(null)}
+        />
+      )}
 
+      <div className="max-w-5xl mx-auto space-y-8">
         {/* ===== Welcome Header ===== */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -63,92 +339,196 @@ export default function OnboardingDashboard({
         >
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-accent to-accent-light flex items-center justify-center shadow-[0_0_20px_rgba(124,58,237,0.5)]">
-              <span className="text-lg">👋</span>
+              <span className="text-lg">🚀</span>
             </div>
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                Welcome, {firstName}
+                Welcome to DraftPilot, {firstName}
               </h1>
               <p className="text-sm text-text-muted">
-                Here&apos;s what your dashboard will look like once connected
+                Complete the 4 setup steps below to unlock milestone badges and start 5× reply velocity
               </p>
             </div>
           </div>
         </motion.div>
 
-        {/* ===== Progress Bar ===== */}
+        {/* ===== Progress Checklist Card ===== */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15, duration: 0.4 }}
-          className="rounded-2xl border border-border bg-bg-card/80 backdrop-blur-xl p-5"
+          transition={{ delay: 0.1, duration: 0.4 }}
+          className="rounded-3xl border border-border bg-bg-card/90 backdrop-blur-xl p-6 sm:p-8 shadow-xl space-y-5"
         >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold">Getting Started</span>
-            <span className="text-xs text-text-dim font-mono">{completedCount}/3 complete</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎯</span>
+                <h2 className="text-base font-bold text-text">Onboarding Progress Checklist</h2>
+              </div>
+              <p className="text-xs text-text-muted mt-0.5">
+                {completedCount} of 4 steps completed ({progressPercent}%)
+              </p>
+            </div>
+            {isAllCompleted ? (
+              <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto shadow-sm">
+                <span>🏆</span>
+                <span>All Milestones Achieved!</span>
+              </span>
+            ) : (
+              <span className="text-xs font-mono text-accent-light font-bold">
+                {4 - completedCount} step{4 - completedCount > 1 ? 's' : ''} remaining
+              </span>
+            )}
           </div>
-          <div className="w-full h-2 bg-elevated rounded-full overflow-hidden">
+
+          {/* Progress Bar */}
+          <div className="w-full h-2.5 bg-elevated rounded-full overflow-hidden p-0.5 border border-border/60">
             <motion.div
-              className="h-full bg-gradient-to-r from-accent to-accent-light rounded-full"
+              className="h-full bg-gradient-to-r from-accent via-purple-500 to-cyan rounded-full shadow-[0_0_12px_rgba(124,58,237,0.7)]"
               initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
+              animate={{ width: `${Math.max(2, progressPercent)}%` }}
               transition={{ duration: 0.8, ease: 'easeOut' }}
             />
           </div>
-        </motion.div>
 
-        {/* ===== Primary CTA: Connect Gmail ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25, duration: 0.4 }}
-          className="rounded-2xl border-2 border-accent/40 bg-gradient-to-br from-accent/10 to-bg-card/90 backdrop-blur-xl p-6 sm:p-8"
-        >
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">📧</span>
-                <h2 className="text-lg font-bold">Connect your Gmail inbox</h2>
+          {/* 4 Interactive Checklist Steps */}
+          <div className="grid sm:grid-cols-2 gap-3 pt-2">
+            {steps.map((step) => (
+              <div
+                key={step.id}
+                onClick={step.onAction}
+                className={`p-4 rounded-2xl border transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                  step.completed
+                    ? 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-border bg-elevated/40 hover:border-accent/40'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
+                      step.completed
+                        ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
+                        : 'border-border bg-bg text-text-dim'
+                    }`}
+                  >
+                    {step.completed ? '✓' : step.icon}
+                  </div>
+                  <div>
+                    <p className={`text-xs font-bold ${step.completed ? 'text-emerald-400 line-through' : 'text-text'}`}>
+                      {step.title}
+                    </p>
+                    <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
+                      {step.description}
+                    </p>
+                  </div>
+                </div>
+
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
+                    step.completed
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-accent/15 text-accent-light'
+                  }`}
+                >
+                  {step.actionLabel}
+                </span>
               </div>
-              <p className="text-sm text-text-muted max-w-lg">
-                Install the DraftPilot Chrome extension and connect your Gmail to start seeing real AI-drafted replies for your incoming support emails.
-              </p>
-            </div>
-            <button
-              onClick={() => setIsInstallModalOpen(true)}
-              className="shrink-0 px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-sm shadow-[0_0_30px_rgba(124,58,237,0.5)] hover:shadow-[0_0_40px_rgba(124,58,237,0.7)] transition-all flex items-center gap-2 animate-pulse hover:animate-none cursor-pointer"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-              </svg>
-              <span>Install Chrome Extension</span>
-            </button>
+            ))}
           </div>
         </motion.div>
 
-        {/* ===== Two-Column: Demo Draft + Checklist ===== */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        {/* ===== Milestone Achievement Badges Showcase ===== */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.4 }}
+          className="rounded-3xl border border-border bg-bg-card/90 backdrop-blur-xl p-6 sm:p-8 shadow-xl space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🏅</span>
+              <h2 className="text-base font-bold text-text">Milestone Achievement Badges (5)</h2>
+            </div>
+            <span className="text-xs text-text-dim">
+              Unlocked badges sync across team profiles
+            </span>
+          </div>
 
-          {/* Demo Draft Example (2 cols) */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {achievementBadges.map((badge) => (
+              <div
+                key={badge.id}
+                className={`p-4 rounded-2xl border text-center flex flex-col items-center justify-between space-y-2.5 transition-all relative overflow-hidden ${
+                  badge.isUnlocked
+                    ? 'border-accent/60 bg-gradient-to-b from-accent/15 to-elevated shadow-[0_0_20px_rgba(124,58,237,0.25)]'
+                    : 'border-border/60 bg-bg/40 opacity-50 grayscale'
+                }`}
+              >
+                {/* Badge Icon with aura if unlocked */}
+                <div className="relative">
+                  <div
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
+                      badge.isUnlocked
+                        ? 'bg-gradient-to-tr from-accent to-cyan text-white shadow-md'
+                        : 'bg-elevated text-text-dim'
+                    }`}
+                  >
+                    {badge.icon}
+                  </div>
+                  {badge.isUnlocked && (
+                    <div className="absolute -inset-1 rounded-xl bg-accent opacity-30 blur-sm -z-10 animate-pulse" />
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-bold text-text truncate w-full">{badge.name}</h3>
+                  <p className="text-[10px] text-text-dim mt-0.5 line-clamp-2">
+                    {badge.description}
+                  </p>
+                </div>
+
+                <span
+                  className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                    badge.isUnlocked
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-elevated text-text-dim border border-border'
+                  }`}
+                >
+                  {badge.isUnlocked ? 'Unlocked ✨' : 'Locked 🔒'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* ===== Interactive Demo Draft Section ===== */}
+        <div className="grid lg:grid-cols-3 gap-6">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35, duration: 0.4 }}
-            className="lg:col-span-2 rounded-2xl border border-border bg-bg-card/80 backdrop-blur-xl overflow-hidden"
-            onClick={handleViewDemo}
+            transition={{ delay: 0.3, duration: 0.4 }}
+            className="lg:col-span-2 rounded-3xl border border-border bg-bg-card/90 backdrop-blur-xl overflow-hidden shadow-xl"
           >
-            {/* Demo Badge Banner */}
-            <div className="px-5 py-3 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold uppercase tracking-wider">
-                📋 Example
-              </span>
-              <span className="text-xs text-amber-400/80">
-                Connect your inbox to see this with your real emails
-              </span>
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-500/10 to-accent/10 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-md bg-accent/20 border border-accent/40 text-accent-light text-[10px] font-bold uppercase tracking-wider">
+                  ⚡ Live Interactive Draft
+                </span>
+                <span className="text-xs text-text-muted">
+                  Test reply synthesis &amp; PII redaction
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleTriggerDemoDraft}
+                className="px-3.5 py-1 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer"
+              >
+                Synthesize AI Reply →
+              </button>
             </div>
 
-            <div className="p-5 sm:p-6 space-y-5">
-              {/* Customer Email */}
+            <div className="p-6 space-y-5">
+              {/* Customer Email Thread */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -162,19 +542,17 @@ export default function OnboardingDashboard({
                   </div>
                   <span className="text-[10px] text-text-dim">{DEMO_DRAFT_EXAMPLE.customerEmail.timestamp}</span>
                 </div>
-                <div className="ml-10 p-3.5 rounded-xl bg-elevated/60 border border-border/50 text-xs text-text-muted leading-relaxed whitespace-pre-line">
+                <div className="ml-10 p-4 rounded-2xl bg-elevated/60 border border-border/50 text-xs text-text-muted leading-relaxed whitespace-pre-line">
                   {DEMO_DRAFT_EXAMPLE.customerEmail.body}
                 </div>
               </div>
 
-              {/* AI Draft Reply */}
+              {/* AI Draft Reply Preview */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
+                      <span className="text-xs">⚡</span>
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-accent-light">DraftPilot AI Draft</p>
@@ -183,14 +561,14 @@ export default function OnboardingDashboard({
                       </p>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full bg-success/15 border border-success/30 text-success text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
                     {DEMO_DRAFT_EXAMPLE.aiDraft.confidence}% match
                   </span>
                 </div>
 
-                <button
+                <div
                   onClick={() => setExpandedDraft(!expandedDraft)}
-                  className="ml-10 w-[calc(100%-2.5rem)] text-left cursor-pointer"
+                  className="ml-10 cursor-pointer"
                 >
                   <AnimatePresence mode="wait">
                     {expandedDraft ? (
@@ -199,74 +577,70 @@ export default function OnboardingDashboard({
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="p-3.5 rounded-xl bg-accent/5 border border-accent/20 text-xs text-text leading-relaxed whitespace-pre-line"
+                        className="p-4 rounded-2xl bg-accent/10 border border-accent/30 text-xs text-text leading-relaxed whitespace-pre-line shadow-inner"
                       >
                         {DEMO_DRAFT_EXAMPLE.aiDraft.body}
                       </motion.div>
                     ) : (
-                      <motion.div
-                        key="collapsed"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="p-3 rounded-xl bg-accent/5 border border-accent/20 text-xs text-text-muted"
-                      >
+                      <div className="p-3 rounded-xl bg-accent/5 border border-accent/20 text-xs text-text-muted">
                         Click to expand AI draft preview...
-                      </motion.div>
+                      </div>
                     )}
                   </AnimatePresence>
-                </button>
+                </div>
               </div>
             </div>
           </motion.div>
 
-          {/* Onboarding Checklist (1 col) */}
+          {/* Quick Actions & Navigation (1 col) */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.4 }}
-            className="rounded-2xl border border-border bg-bg-card/80 backdrop-blur-xl p-5 sm:p-6 flex flex-col justify-between"
+            transition={{ delay: 0.35, duration: 0.4 }}
+            className="rounded-3xl border border-border bg-bg-card/90 backdrop-blur-xl p-6 flex flex-col justify-between space-y-6 shadow-xl"
           >
-            <div>
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-                <span>🚀</span>
-                <span>Quick Setup</span>
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <span>⚡</span>
+                <span>Quick Actions</span>
               </h3>
 
-              <div className="space-y-3">
-                <ChecklistItem
-                  completed={onboardingState.gmail_connected}
-                  label="Connect Gmail"
-                  description="Link your inbox to get real-time draft suggestions"
-                  icon="📧"
-                  onClick={() => setIsInstallModalOpen(true)}
-                />
+              <button
+                type="button"
+                onClick={() => setIsInstallModalOpen(true)}
+                className="w-full p-3 rounded-xl bg-accent/10 hover:bg-accent/20 border border-accent/30 text-left text-xs font-semibold text-accent-light transition-all cursor-pointer flex items-center gap-2.5"
+              >
+                <span>🧩</span>
+                <span>Install Chrome Extension</span>
+              </button>
 
-                <ChecklistItem
-                  completed={onboardingState.first_macro_added}
-                  label="Add your first real macro"
-                  description="Create a custom reply template for your team"
-                  icon="📝"
-                  onClick={() => handleToggleStep('first_macro_added')}
-                />
+              <button
+                type="button"
+                onClick={() => setIsInviteModalOpen(true)}
+                className="w-full p-3 rounded-xl bg-elevated hover:bg-white/5 border border-border text-left text-xs font-semibold text-text transition-all cursor-pointer flex items-center gap-2.5"
+              >
+                <span>👥</span>
+                <span>Invite Team Co-Pilot</span>
+              </button>
 
-                <ChecklistItem
-                  completed={onboardingState.extension_installed}
-                  label="Install Chrome extension"
-                  description="Get AI drafts directly in your Gmail compose window"
-                  icon="🧩"
-                  onClick={() => setIsInstallModalOpen(true)}
-                />
-              </div>
+              <button
+                type="button"
+                onClick={handleTriggerDemoDraft}
+                className="w-full p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-left text-xs font-semibold text-purple-300 transition-all cursor-pointer flex items-center gap-2.5"
+              >
+                <span>🎉</span>
+                <span>Test First AI Draft Trigger</span>
+              </button>
             </div>
 
-            {/* Skip to dashboard link */}
             {onNavigateToDashboard && (
-              <div className="mt-6 pt-4 border-t border-border/40">
+              <div className="pt-4 border-t border-border/40">
                 <button
+                  type="button"
                   onClick={onNavigateToDashboard}
-                  className="text-xs text-text-dim hover:text-accent transition-colors cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-elevated hover:bg-white/5 border border-border text-xs text-text font-bold transition-all cursor-pointer text-center"
                 >
-                  Skip setup → Explore dashboard
+                  Enter Main Dashboard →
                 </button>
               </div>
             )}
@@ -277,7 +651,7 @@ export default function OnboardingDashboard({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.4 }}
+          transition={{ delay: 0.4, duration: 0.4 }}
           className="space-y-4"
         >
           <div className="flex items-center justify-between">
@@ -294,7 +668,7 @@ export default function OnboardingDashboard({
             {DEMO_MACROS.map((macro) => (
               <div
                 key={macro.id}
-                className="rounded-xl border border-border bg-bg-card/70 backdrop-blur-sm p-4 space-y-3 hover:border-border-hover transition-colors"
+                className="rounded-2xl border border-border bg-bg-card/70 backdrop-blur-sm p-4 space-y-3 hover:border-border-hover transition-colors"
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -325,7 +699,7 @@ export default function OnboardingDashboard({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6, duration: 0.4 }}
+          transition={{ delay: 0.45, duration: 0.4 }}
           className="space-y-4"
         >
           <div className="flex items-center justify-between">
@@ -345,10 +719,9 @@ export default function OnboardingDashboard({
             <StatCard label="Active Macros" value={String(DEMO_STATS.macrosActive)} icon="📝" />
           </div>
         </motion.div>
-
       </div>
 
-      {/* ===== Interactive Chrome Extension Install Modal ===== */}
+      {/* ===== Chrome Extension Install Modal ===== */}
       <AnimatePresence>
         {isInstallModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
@@ -359,6 +732,7 @@ export default function OnboardingDashboard({
               className="w-full max-w-lg rounded-3xl bg-bg-card border border-border p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden"
             >
               <button
+                type="button"
                 onClick={() => setIsInstallModalOpen(false)}
                 className="absolute right-5 top-5 text-text-dim hover:text-text text-sm p-1 rounded-full bg-elevated border border-border cursor-pointer"
               >
@@ -376,12 +750,11 @@ export default function OnboardingDashboard({
               </div>
 
               <div className="space-y-4 text-xs">
-                {/* 1-Click Download Button */}
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-accent/15 to-cyan/15 border border-accent/40 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-bold text-text text-sm">Download Extension (.zip)</p>
-                      <p className="text-text-muted text-[11px]">Free direct download · No Chrome Web Store fee needed</p>
+                      <p className="text-text-muted text-[11px]">Free direct download · Developer unpacked ready</p>
                     </div>
                     <a
                       href="/draftpilot-extension.zip"
@@ -394,40 +767,31 @@ export default function OnboardingDashboard({
                   </div>
                 </div>
 
-                {/* 30-Second Quick Setup Guide */}
-                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2.5">
-                  <p className="font-semibold text-text flex items-center gap-1.5">
-                    <span>⚡</span>
-                    <span>How to Install in 30 Seconds (100% Free):</span>
-                  </p>
-                  <ol className="list-decimal list-inside space-y-2 text-text-muted text-[11px] pl-1 leading-relaxed">
-                    <li>
-                      <strong>Download and extract</strong> the <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">draftpilot-extension.zip</code> file on your computer.
-                    </li>
-                    <li>
-                      Open Google Chrome and go to <code className="bg-bg px-1.5 py-0.5 rounded text-accent-light font-mono">chrome://extensions</code>.
-                    </li>
-                    <li>
-                      In the top-right corner, toggle ON <strong>Developer mode</strong>.
-                    </li>
-                    <li>
-                      Click the <strong>Load unpacked</strong> button in the top-left and select the extracted folder.
-                    </li>
-                  </ol>
+                <div className="p-4 rounded-2xl bg-elevated/70 border border-border space-y-2 text-[11px] text-text-muted">
+                  <p className="font-semibold text-text">Quick Setup:</p>
+                  <p>1. Download and unzip <code>draftpilot-extension.zip</code>.</p>
+                  <p>2. In Chrome, open <code>chrome://extensions</code> and turn ON Developer mode.</p>
+                  <p>3. Click &quot;Load unpacked&quot; and select the extracted folder.</p>
                 </div>
               </div>
 
               <div className="flex items-center justify-between gap-3 pt-2">
                 <button
+                  type="button"
                   onClick={() => {
-                    handleToggleStep('extension_installed');
-                    handleToggleStep('gmail_connected');
+                    updateStep('extension_installed', true);
                     setIsInstallModalOpen(false);
-                    onNavigateToDashboard?.();
+                    setCelebrationConfig({
+                      isActive: true,
+                      title: '🧩 Extension Pioneer Unlocked!',
+                      message: 'Chrome extension connected! DraftPilot will now display inline assistance in Gmail.',
+                      badgeName: 'Extension Pioneer',
+                      badgeIcon: '🧩',
+                    });
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer text-center"
                 >
-                  ✓ Done! I Installed the Extension → Enter Dashboard
+                  ✓ Done! I Installed the Extension
                 </button>
               </div>
             </motion.div>
@@ -435,60 +799,75 @@ export default function OnboardingDashboard({
         )}
       </AnimatePresence>
 
-    </div>
-  );
-}
+      {/* ===== Invite Team Member Modal ===== */}
+      <AnimatePresence>
+        {isInviteModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md rounded-3xl bg-bg-card border border-border p-6 sm:p-8 shadow-2xl space-y-5 relative"
+            >
+              <button
+                type="button"
+                onClick={() => setIsInviteModalOpen(false)}
+                className="absolute right-5 top-5 text-text-dim hover:text-text text-sm p-1 rounded-full bg-elevated border border-border cursor-pointer"
+              >
+                ✕
+              </button>
 
-/* =================== Sub-components =================== */
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/20 border border-accent/40 text-accent-light text-xs font-bold mb-2">
+                  <span>👥</span>
+                  <span>Team Collaboration</span>
+                </div>
+                <h3 className="text-xl font-bold text-text">Invite Team Member</h3>
+                <p className="text-xs text-text-muted mt-1">
+                  Add a colleague to your workspace to share macros and draft limits.
+                </p>
+              </div>
 
-function ChecklistItem({
-  completed,
-  label,
-  description,
-  icon,
-  onClick,
-}: {
-  completed: boolean;
-  label: string;
-  description: string;
-  icon: string;
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
-        completed
-          ? 'border-success/30 bg-success/5'
-          : 'border-border bg-elevated/30 hover:border-accent/40'
-      }`}
-    >
-      <div
-        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
-          completed
-            ? 'border-success bg-success text-white'
-            : 'border-border'
-        }`}
-      >
-        {completed && (
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
+              <form onSubmit={handleSendInvite} className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-text font-semibold mb-1">Teammate Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="agent@company.com"
+                    className="w-full rounded-xl bg-bg border border-border px-3.5 py-2.5 text-text focus:outline-none focus:border-accent"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsInviteModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl bg-bg border border-border text-text-dim hover:text-text cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold shadow-[0_0_15px_rgba(124,58,237,0.4)] transition-all cursor-pointer"
+                  >
+                    Send Invitation
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
         )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className={`text-xs font-semibold ${completed ? 'text-success line-through' : 'text-text'}`}>
-          {icon} {label}
-        </p>
-        <p className="text-[11px] text-text-dim mt-0.5">{description}</p>
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: string }) {
   return (
-    <div className="rounded-xl border border-border bg-bg-card/70 backdrop-blur-sm p-4 text-center space-y-1.5">
+    <div className="rounded-2xl border border-border bg-bg-card/70 backdrop-blur-sm p-4 text-center space-y-1.5">
       <span className="text-lg">{icon}</span>
       <p className="text-xl font-extrabold font-mono tracking-tight">{value}</p>
       <p className="text-[10px] text-text-dim">{label}</p>

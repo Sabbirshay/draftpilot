@@ -39,6 +39,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshOnboardingState: () => Promise<void>;
   updateOnboardingFlag: (updates: Partial<OnboardingState>) => Promise<void>;
+  refreshUser?: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -395,6 +396,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.user) {
+        setUser(currentSession.user);
+        await handleProvision(currentSession);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh user:', err);
+    }
+  }, [handleProvision]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -410,6 +423,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOut,
         refreshOnboardingState,
         updateOnboardingFlag,
+        refreshUser,
       }}
     >
       {children}

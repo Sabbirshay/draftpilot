@@ -10,6 +10,7 @@ export default defineConfig({
         sidepanel: resolve(__dirname, 'src/sidepanel/index.html'),
         'service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
         'gmail-detector': resolve(__dirname, 'src/content/gmail-detector.ts'),
+        'web-handshake': resolve(__dirname, 'src/content/web-handshake.ts'),
       },
       output: {
         entryFileNames: '[name].js',

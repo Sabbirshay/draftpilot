@@ -1,98 +1,38 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  DateRangeState,
+  DatePreset,
+  computeDatePresets,
+  calculateCustomComparison,
+} from '@/lib/date-utils';
 
-export interface DateRangeState {
-  startDate: string; // YYYY-MM-DD
-  endDate: string;   // YYYY-MM-DD
-  label: string;
-  compareStartDate: string;
-  compareEndDate: string;
-  compareLabel: string;
-  granularity: 'Hourly' | 'Daily' | 'Weekly' | 'Monthly';
-}
+export type { DateRangeState, DatePreset };
 
 interface DateRangePickerProps {
   dateRange: DateRangeState;
   onChange: (newRange: DateRangeState) => void;
 }
 
-const PRESETS = [
-  {
-    label: 'Today',
-    days: 1,
-    start: '2026-08-22',
-    end: '2026-08-22',
-    display: 'Aug 22, 2026',
-    compStart: '2026-08-21',
-    compEnd: '2026-08-21',
-    compDisplay: 'Aug 21, 2026',
-  },
-  {
-    label: 'Last 7 Days',
-    days: 7,
-    start: '2026-08-16',
-    end: '2026-08-22',
-    display: 'Aug 16 – Aug 22',
-    compStart: '2026-08-09',
-    compEnd: '2026-08-15',
-    compDisplay: 'Aug 09 – Aug 15',
-  },
-  {
-    label: 'Last 30 Days',
-    days: 30,
-    start: '2026-07-24',
-    end: '2026-08-22',
-    display: 'Jul 24 – Aug 22',
-    compStart: '2026-06-24',
-    compEnd: '2026-07-23',
-    compDisplay: 'Jun 24 – Jul 23',
-  },
-  {
-    label: 'This Month (Aug)',
-    days: 31,
-    start: '2026-08-01',
-    end: '2026-08-31',
-    display: 'Aug 01 – Aug 31',
-    compStart: '2026-07-01',
-    compEnd: '2026-07-31',
-    compDisplay: 'Jul 01 – Jul 31',
-  },
-  {
-    label: 'Last Month (Jul)',
-    days: 31,
-    start: '2026-07-01',
-    end: '2026-07-31',
-    display: 'Jul 01 – Jul 31',
-    compStart: '2026-06-01',
-    compEnd: '2026-06-30',
-    compDisplay: 'Jun 01 – Jun 30',
-  },
-  {
-    label: 'Year to Date (YTD)',
-    days: 234,
-    start: '2026-01-01',
-    end: '2026-08-22',
-    display: 'Jan 01 – Aug 22',
-    compStart: '2025-01-01',
-    compEnd: '2025-08-22',
-    compDisplay: 'Jan 01 – Aug 22, 2025',
-  },
-];
-
 export default function DateRangePicker({ dateRange, onChange }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isGranularityOpen, setIsGranularityOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('This Month (Aug)');
   
-  // Interactive calendar month state (Current viewing month)
-  const [currentMonth, setCurrentMonth] = useState(7); // 0-indexed (7 = August)
-  const [currentYear, setCurrentYear] = useState(2026);
+  // Dynamically compute presets relative to current date
+  const { presets } = useMemo(() => computeDatePresets(), []);
+
+  // Default selected preset matches 'Last 30 Days' or dateRange
+  const [selectedPreset, setSelectedPreset] = useState('Last 30 Days');
+  
+  // Interactive calendar month state (Current viewing month, dynamically initialized to current date)
+  const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
   
   // Custom date selection state
-  const [customStartDay, setCustomStartDay] = useState<number | null>(1);
-  const [customEndDay, setCustomEndDay] = useState<number | null>(31);
+  const [customStartDay, setCustomStartDay] = useState<number | null>(null);
+  const [customEndDay, setCustomEndDay] = useState<number | null>(null);
   const [selectingStep, setSelectingStep] = useState<'start' | 'end'>('start');
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -114,12 +54,12 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
-  const handlePresetSelect = (preset: typeof PRESETS[0]) => {
+  const handlePresetSelect = (preset: DatePreset) => {
     setSelectedPreset(preset.label);
     onChange({
       ...dateRange,
-      startDate: preset.start,
-      endDate: preset.end,
+      startDate: preset.startDate,
+      endDate: preset.endDate,
       label: preset.display,
       compareStartDate: preset.compStart,
       compareEndDate: preset.compEnd,
@@ -149,6 +89,7 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
       const startStr = `${currentYear}-${monthStr}-${start.toString().padStart(2, '0')}`;
       const endStr = `${currentYear}-${monthStr}-${end.toString().padStart(2, '0')}`;
       const monthAbbr = monthNames[currentMonth].substring(0, 3);
+      const comp = calculateCustomComparison(startStr, endStr);
 
       setSelectedPreset('Custom');
       onChange({
@@ -156,9 +97,9 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
         startDate: startStr,
         endDate: endStr,
         label: `${monthAbbr} ${start.toString().padStart(2, '0')} – ${monthAbbr} ${end.toString().padStart(2, '0')}`,
-        compareStartDate: `${currentYear}-${monthStr}-01`,
-        compareEndDate: `${currentYear}-${monthStr}-15`,
-        compareLabel: `Prev ${end - start + 1} days`,
+        compareStartDate: comp.compStart,
+        compareEndDate: comp.compEnd,
+        compareLabel: comp.compLabel,
       });
       setIsOpen(false);
     }
@@ -167,22 +108,22 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
   const handlePrevMonth = () => {
     if (currentMonth === 0) {
       setCurrentMonth(11);
-      setCurrentYear(currentYear - 1);
+      setCurrentYear((y) => y - 1);
     } else {
-      setCurrentMonth(currentMonth - 1);
+      setCurrentMonth((m) => m - 1);
     }
   };
 
   const handleNextMonth = () => {
     if (currentMonth === 11) {
       setCurrentMonth(0);
-      setCurrentYear(currentYear + 1);
+      setCurrentYear((y) => y + 1);
     } else {
-      setCurrentMonth(currentMonth + 1);
+      setCurrentMonth((m) => m + 1);
     }
   };
 
-  // Generate days in month
+  // Generate days in month dynamically
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
 
@@ -271,6 +212,7 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsOpen(false)}
                 className="w-6 h-6 rounded-full bg-elevated hover:bg-white/10 text-text-dim hover:text-text flex items-center justify-center text-xs cursor-pointer"
               >
@@ -285,7 +227,7 @@ export default function DateRangePicker({ dateRange, onChange }: DateRangePicker
                 <span className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-2 font-mono">
                   Quick Presets
                 </span>
-                {PRESETS.map((p) => (
+                {presets.map((p) => (
                   <button
                     key={p.label}
                     type="button"

@@ -34,8 +34,17 @@ export class BillingController {
   @ApiBearerAuth()
   @UseGuards(AuthGuard)
   @Post('checkout')
-  async createCheckout(@CurrentUser() user: any) {
-    return await this.billingService.createCheckoutSession(user.team_id, user.email);
+  async createCheckout(
+    @CurrentUser() user: any,
+    @Body() body?: { cadence?: 'monthly' | 'yearly'; seats?: number; tier?: string }
+  ) {
+    return await this.billingService.createCheckoutSession(
+      user.team_id,
+      user.email,
+      body?.cadence || 'monthly',
+      body?.seats || 1,
+      body?.tier || 'team'
+    );
   }
 
   @ApiBearerAuth()

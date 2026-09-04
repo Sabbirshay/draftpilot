@@ -1,9 +1,33 @@
 /**
  * Client-Side PII Scrubber (Inlined to prevent ES module chunk splitting in Chrome content script)
  */
-function scrubPII(text: string): string {
+function scrubPII(text: string, customRules?: any[]): string {
   if (!text) return '';
   let scrubbed = text;
+
+  // 0. Custom Rules
+  if (customRules && Array.isArray(customRules)) {
+    for (const rule of customRules) {
+      if (!rule || rule.enabled === false || !rule.pattern || typeof rule.pattern !== 'string') continue;
+      const replacement = rule.replacement?.trim() || '[CUSTOM_REDACTED]';
+      try {
+        const isKeyword = rule.rule_type === 'keyword' || (!rule.rule_type && rule.isRegex === false);
+        if (isKeyword) {
+          const escaped = rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const isWord = /^\w+(?:[\s-]+\w+)*$/.test(rule.pattern.trim());
+          const keywordRegex = new RegExp(isWord ? `\\b${escaped}\\b` : escaped, 'gi');
+          scrubbed = scrubbed.replace(keywordRegex, replacement);
+        } else {
+          if (rule.pattern.length <= 500 && !/(\([^\)]*[\+\*][^\)]*\))[\+\*]/.test(rule.pattern)) {
+            const customRegex = new RegExp(rule.pattern, 'gi');
+            scrubbed = scrubbed.replace(customRegex, replacement);
+          }
+        }
+      } catch (err) {
+        // Safe catch
+      }
+    }
+  }
 
   // 1. Credit Card Numbers (13-19 digits with optional hyphens/spaces)
   scrubbed = scrubbed.replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_REDACTED]');

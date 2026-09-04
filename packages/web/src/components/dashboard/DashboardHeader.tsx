@@ -1,28 +1,36 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
 import DateRangePicker, { DateRangeState } from './DateRangePicker';
 import NotificationCenter from './NotificationCenter';
+import HelpSupportCenter from './HelpSupportCenter';
 import { useAuth } from '@/components/providers/AuthProvider';
 
-export type DashboardTab = 'overview' | 'macros' | 'team' | 'billing' | 'gmail';
+export type DashboardTab = 'overview' | 'macros' | 'team' | 'billing' | 'gmail' | 'settings';
 
 interface DashboardHeaderProps {
-  activeTab: DashboardTab;
-  onTabChange: (tab: DashboardTab) => void;
-  onAddMacroClick: () => void;
-  dateRange: DateRangeState;
-  onDateRangeChange: (range: DateRangeState) => void;
+  activeTab?: DashboardTab;
+  onTabChange?: (tab: DashboardTab) => void;
+  onAddMacroClick?: () => void;
+  dateRange?: DateRangeState;
+  onDateRangeChange?: (range: DateRangeState) => void;
+  onTryDemoClick?: () => void;
+  showActionBar?: boolean;
 }
 
 export default function DashboardHeader({
-  activeTab,
+  activeTab = 'overview',
   onTabChange,
   onAddMacroClick,
   dateRange,
   onDateRangeChange,
+  onTryDemoClick,
+  showActionBar = true,
 }: DashboardHeaderProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const { dbUser, user, signOut } = useAuth();
   const userEmail = dbUser?.email || user?.email || '';
   const fullName =
@@ -37,9 +45,30 @@ export default function DashboardHeader({
     null;
   const teamName = dbUser?.teams?.name || `${fullName}'s Team`;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close profile dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = async () => {
     await signOut();
+  };
+
+  const handleNavTab = (tab: DashboardTab) => {
+    if (pathname !== '/dashboard') {
+      router.push(`/dashboard?tab=${tab}`);
+    }
+    if (onTabChange) {
+      onTabChange(tab);
+    }
   };
 
   return (
@@ -60,7 +89,7 @@ export default function DashboardHeader({
           {/* Navigation Pill Menu */}
           <nav className="flex items-center gap-1 bg-elevated/70 p-1 rounded-full border border-border/80 text-xs overflow-x-auto">
             <button
-              onClick={() => onTabChange('overview')}
+              onClick={() => handleNavTab('overview')}
               className={`px-4 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 activeTab === 'overview'
                   ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.5)]'
@@ -70,7 +99,7 @@ export default function DashboardHeader({
               Overview
             </button>
             <button
-              onClick={() => onTabChange('macros')}
+              onClick={() => handleNavTab('macros')}
               className={`px-4 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 activeTab === 'macros'
                   ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.5)]'
@@ -80,7 +109,7 @@ export default function DashboardHeader({
               Macros &amp; KB
             </button>
             <button
-              onClick={() => onTabChange('team')}
+              onClick={() => handleNavTab('team')}
               className={`px-4 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 activeTab === 'team'
                   ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.5)]'
@@ -90,7 +119,7 @@ export default function DashboardHeader({
               Team Seats
             </button>
             <button
-              onClick={() => onTabChange('billing')}
+              onClick={() => handleNavTab('billing')}
               className={`px-4 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 activeTab === 'billing'
                   ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.5)]'
@@ -100,7 +129,7 @@ export default function DashboardHeader({
               Billing &amp; Usage
             </button>
             <button
-              onClick={() => onTabChange('gmail')}
+              onClick={() => handleNavTab('gmail')}
               className={`px-4 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 activeTab === 'gmail'
                   ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.5)]'
@@ -112,8 +141,25 @@ export default function DashboardHeader({
           </nav>
         </div>
 
-        {/* Right Header Actions: Search, Notifications, Avatar */}
-        <div className="flex items-center gap-3">
+        {/* Right Header Actions: Try Demo, Search, Support, Notifications, Avatar */}
+        <div className="flex items-center gap-2.5">
+          {/* Try Demo Mode Trigger Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onTryDemoClick) {
+                onTryDemoClick();
+              } else if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('draftpilot:open-demo'));
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-accent/20 to-cyan/20 hover:from-accent/30 hover:to-cyan/30 border border-accent/40 text-text text-xs font-semibold transition-all shadow-[0_0_12px_rgba(124,58,237,0.25)] cursor-pointer"
+            title="Try interactive demo mode on sample tickets"
+          >
+            <span className="text-accent-light">✨</span>
+            <span className="hidden md:inline">Try Demo</span>
+          </button>
+
           {/* Quick Search */}
           <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-elevated/60 border border-border text-xs text-text-dim">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -123,11 +169,14 @@ export default function DashboardHeader({
             <kbd className="px-1.5 py-0.5 text-[10px] bg-bg rounded border border-border">⌘K</kbd>
           </div>
 
+          {/* Help & Support Center Flyout */}
+          <HelpSupportCenter />
+
           {/* Notification Center Popover */}
-          <NotificationCenter onNavigateTab={onTabChange} />
+          <NotificationCenter onNavigateTab={handleNavTab} />
 
           {/* User Profile Avatar with dropdown */}
-          <div className="relative">
+          <div ref={profileMenuRef} className="relative">
             <button
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               className="flex items-center gap-2 p-1 rounded-full bg-elevated/80 border border-border hover:border-accent/50 transition-all cursor-pointer"
@@ -147,20 +196,36 @@ export default function DashboardHeader({
             </button>
 
             {isProfileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-bg-card border border-border shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
+              <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-bg-card border border-border shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
                 <div className="px-3 py-2 border-b border-border/50 mb-1">
                   <p className="text-xs font-bold text-text truncate">{fullName}</p>
                   <p className="text-[11px] text-text-dim truncate">{teamName} · {userEmail}</p>
                 </div>
-                <button
-                  onClick={() => { onTabChange('team'); setIsProfileMenuOpen(false); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors"
+                <Link
+                  href="/dashboard/settings"
+                  onClick={() => setIsProfileMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors font-medium text-accent-light"
                 >
-                  👥 Team Seats (5 total)
+                  <span>⚙️</span>
+                  <span>Profile &amp; Account Settings</span>
+                </Link>
+                <Link
+                  href="/dashboard/settings"
+                  onClick={() => setIsProfileMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors font-medium text-purple-300"
+                >
+                  <span>🛡️</span>
+                  <span>Custom PII Scrubbing Rules</span>
+                </Link>
+                <button
+                  onClick={() => { handleNavTab('team'); setIsProfileMenuOpen(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
+                >
+                  👥 Team Seats
                 </button>
                 <button
-                  onClick={() => { onTabChange('billing'); setIsProfileMenuOpen(false); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors"
+                  onClick={() => { handleNavTab('billing'); setIsProfileMenuOpen(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-muted hover:text-text hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
                 >
                   💳 Plan &amp; Billing
                 </button>
@@ -173,7 +238,7 @@ export default function DashboardHeader({
                 <div className="border-t border-border/50 mt-1 pt-1">
                   <button
                     onClick={handleLogout}
-                    className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded-xl transition-colors font-medium"
+                    className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded-xl transition-colors font-medium cursor-pointer"
                   >
                     Log out
                   </button>
@@ -185,38 +250,45 @@ export default function DashboardHeader({
       </div>
 
       {/* Main Title & Action Bar matching Reference */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-text font-mono">
-            {activeTab === 'overview' && 'Overview'}
-            {activeTab === 'macros' && 'Knowledge Base & Macros'}
-            {activeTab === 'team' && 'Team & Agent Seats'}
-            {activeTab === 'billing' && 'Billing & Quota'}
-            {activeTab === 'gmail' && 'Gmail Extension Sync'}
-          </h1>
-          <span className="p-1 rounded-md bg-elevated border border-border text-text-dim text-xs">
-            🔗
-          </span>
-        </div>
+      {showActionBar && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-text font-mono">
+              {activeTab === 'overview' && 'Overview'}
+              {activeTab === 'macros' && 'Knowledge Base & Macros'}
+              {activeTab === 'team' && 'Team & Agent Seats'}
+              {activeTab === 'billing' && 'Billing & Quota'}
+              {activeTab === 'gmail' && 'Gmail Extension Sync'}
+              {activeTab === 'settings' && 'Account Settings'}
+            </h1>
+            <span className="p-1 rounded-md bg-elevated border border-border text-text-dim text-xs">
+              🔗
+            </span>
+          </div>
 
-        {/* Date Filters and Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 text-xs">
-          {/* Interactive Date Range Picker */}
-          <DateRangePicker
-            dateRange={dateRange}
-            onChange={onDateRangeChange}
-          />
+          {/* Date Filters and Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            {/* Interactive Date Range Picker */}
+            {dateRange && onDateRangeChange && (
+              <DateRangePicker
+                dateRange={dateRange}
+                onChange={onDateRangeChange}
+              />
+            )}
 
-          {/* Add Macro Button */}
-          <button
-            onClick={onAddMacroClick}
-            className="px-4 py-1.5 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] flex items-center gap-1.5 cursor-pointer"
-          >
-            <span>+</span>
-            <span>New Macro</span>
-          </button>
+            {/* Add Macro Button */}
+            {onAddMacroClick && (
+              <button
+                onClick={onAddMacroClick}
+                className="px-4 py-1.5 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>+</span>
+                <span>New Macro</span>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

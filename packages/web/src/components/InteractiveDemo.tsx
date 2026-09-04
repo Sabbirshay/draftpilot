@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import TryDemoModeModal from './dashboard/TryDemoModeModal';
 
 export function InteractiveDemo() {
   const [activeStep, setActiveStep] = useState<number>(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState<boolean>(true);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState<boolean>(false);
 
   const steps = [
     {
@@ -79,9 +81,17 @@ export function InteractiveDemo() {
             <div className="w-3 h-3 rounded-full bg-green-500/80" />
             <span className="ml-3 text-xs text-text-dim font-mono">mail.google.com/mail/u/0/#inbox</span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-text-muted">
-            <span className="inline-block w-2 h-2 rounded-full bg-success animate-pulse" />
-            <span>DraftPilot Copilot Active</span>
+          <div className="flex items-center gap-3 text-xs text-text-muted">
+            <button
+              onClick={() => setIsDemoModalOpen(true)}
+              className="px-3 py-1 rounded-full bg-accent/20 hover:bg-accent/30 text-accent-light text-[11px] font-bold border border-accent/40 transition-colors flex items-center gap-1.5 cursor-pointer shadow-[0_0_15px_rgba(124,58,237,0.3)]"
+            >
+              <span>✨ Try Demo Sandbox</span>
+            </button>
+            <div className="hidden sm:flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-success animate-pulse" />
+              <span>DraftPilot Copilot Active</span>
+            </div>
           </div>
         </div>
 
@@ -234,7 +244,35 @@ export function InteractiveDemo() {
             </div>
           </div>
         </div>
+
+        {/* Launch Full Interactive Sandbox Banner */}
+        <div className="mt-6 pt-5 border-t border-border/60 flex flex-col sm:flex-row items-center justify-between gap-4 bg-elevated/30 -mx-4 -mb-4 md:-mx-8 md:-mb-8 p-4 md:p-6 rounded-b-3xl">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-accent text-sm font-bold">
+              ✨
+            </div>
+            <div>
+              <p className="text-xs font-bold text-text">Want to test other customer scenarios?</p>
+              <p className="text-[11px] text-text-muted">
+                Try Return/Refund, Shipping Inquiries, Password Resets &amp; Billing questions with live tone modulation.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsDemoModalOpen(true)}
+            className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_20px_rgba(124,58,237,0.4)] flex items-center gap-2 cursor-pointer shrink-0"
+          >
+            <span>Launch Interactive Demo Mode</span>
+            <span>→</span>
+          </button>
+        </div>
       </div>
+
+      {/* Interactive Try Demo Mode Modal */}
+      <TryDemoModeModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+      />
     </div>
   );
 }

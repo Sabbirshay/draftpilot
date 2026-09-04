@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import DashboardHeader, { DashboardTab } from '@/components/dashboard/DashboardHeader';
 import { DateRangeState } from '@/components/dashboard/DateRangePicker';
+import { getInitialDateRange } from '@/lib/date-utils';
 import OverviewBento from '@/components/dashboard/OverviewBento';
 import MacrosManager from '@/components/dashboard/MacrosManager';
 import TeamManager from '@/components/dashboard/TeamManager';
@@ -11,15 +12,7 @@ import BillingManager from '@/components/dashboard/BillingManager';
 import GmailSyncManager from '@/components/dashboard/GmailSyncManager';
 import OnboardingDashboard from '@/components/dashboard/OnboardingDashboard';
 
-const INITIAL_DATE_RANGE: DateRangeState = {
-  startDate: '2026-08-01',
-  endDate: '2026-08-31',
-  label: 'Aug 01 – Aug 31',
-  compareStartDate: '2026-07-01',
-  compareEndDate: '2026-07-31',
-  compareLabel: 'Jul 01 – Jul 31',
-  granularity: 'Daily',
-};
+const INITIAL_DATE_RANGE: DateRangeState = getInitialDateRange();
 
 export default function DashboardPage() {
   const { session, user, dbUser, onboardingState, isLoading, isFirstLogin, updateOnboardingFlag } = useAuth();

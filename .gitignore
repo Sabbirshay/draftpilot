@@ -41,3 +41,5 @@ coverage/
 *.tgz
 .turbo/
 .tools/
+.agents/
+ORIGINAL_REQUEST.md

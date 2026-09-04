@@ -70,18 +70,61 @@ export class BillingService {
     }
   }
 
-  async createCheckoutSession(teamId: string, userEmail: string) {
+  async createCheckoutSession(
+    teamId: string,
+    userEmail: string,
+    cadence: 'monthly' | 'yearly' = 'monthly',
+    seats: number = 1,
+    tier: string = 'team'
+  ) {
     try {
+      const configuredPriceId = this.configService.get('STRIPE_PRICE_ID');
+
+      let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+
+      if (configuredPriceId) {
+        lineItems = [
+          {
+            price: configuredPriceId,
+            quantity: Math.max(1, seats),
+          },
+        ];
+      } else {
+        // Dynamic price data based on tier and cadence
+        const unitAmount =
+          tier === 'enterprise'
+            ? cadence === 'yearly' ? 7900 : 9900 // $79/mo or $99/mo in cents
+            : cadence === 'yearly' ? 1500 : 1900; // $15/seat/mo or $19/seat/mo in cents
+
+        lineItems = [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: `DraftPilot ${tier === 'enterprise' ? 'Enterprise Dedicated' : 'Team Co-Pilot'} Plan`,
+                description: `${tier === 'enterprise' ? 'Enterprise' : 'Team'} plan with AI copilot capabilities (${cadence === 'yearly' ? 'Annual - 20% discount' : 'Monthly'})`,
+              },
+              unit_amount: unitAmount,
+              recurring: {
+                interval: cadence === 'yearly' ? 'year' : 'month',
+              },
+            },
+            quantity: tier === 'enterprise' ? 1 : Math.max(1, seats),
+          },
+        ];
+      }
+
       const session = await this.stripe.checkout.sessions.create({
         payment_method_types: ['card'],
         customer_email: userEmail,
         client_reference_id: teamId,
-        line_items: [
-          {
-            price: this.configService.get('STRIPE_PRICE_ID') || 'price_dummy',
-            quantity: 1,
-          },
-        ],
+        metadata: {
+          teamId,
+          cadence,
+          seats: String(seats),
+          tier,
+        },
+        line_items: lineItems,
         mode: 'subscription',
         success_url: `${this.configService.get('FRONTEND_URL')}/settings/billing?success=true`,
         cancel_url: `${this.configService.get('FRONTEND_URL')}/settings/billing?canceled=true`,
