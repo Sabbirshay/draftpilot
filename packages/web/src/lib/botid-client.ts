@@ -41,9 +41,11 @@ export function explainBotIdResponse(res: Response): string | null {
 export async function prewarmBotId(): Promise<void> {
   if (typeof window === "undefined") return;
   try {
-    const mod = await import("botid");
-    if (typeof mod.init === "function") {
+    const mod: any = await import("botid");
+    if (typeof mod?.init === "function") {
       await mod.init();
+    } else if (typeof mod?.initBotId === "function") {
+      mod.initBotId({ protect: [{ path: "/login", method: "POST" }, { path: "/join", method: "POST" }] });
     }
   } catch {
     // BotID JS is optional on the client; if it fails to load (e.g. ad
