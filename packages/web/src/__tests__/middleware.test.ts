@@ -7,12 +7,14 @@ import { NextRequest } from 'next/server.js';
 import {
   middleware,
   config,
+  cleanToken,
   timingSafeEqual,
   getConfiguredBypassSecrets,
   getConfiguredBypassSecret,
   isAuthorizedAutomationBypass,
   AUTOMATION_BYPASS_HEADERS,
   AUTOMATION_BYPASS_COOKIES,
+  AUTOMATION_BYPASS_QUERY_PARAMS,
 } from '../middleware.ts';
 
 describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () => {
@@ -92,6 +94,49 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       // @ts-ignore
       assert.strictEqual(timingSafeEqual(12345, 12345), false);
     });
+
+    test('rejects oversized inputs (> 4096 chars) to prevent CPU starvation attacks', () => {
+      const hugeInput = 'a'.repeat(5000);
+      assert.strictEqual(timingSafeEqual(hugeInput, TEST_SECRET), false);
+      assert.strictEqual(timingSafeEqual(TEST_SECRET, hugeInput), false);
+    });
+  });
+
+  // =========================================================================
+  // 2B. TOKEN NORMALIZATION & QUOTE SANITIZATION (cleanToken)
+  // =========================================================================
+  describe('2B. Token Normalization & RFC 6265 Quote Handling (cleanToken)', () => {
+    test('unquotes double-quoted tokens and trims whitespace', () => {
+      assert.strictEqual(cleanToken('"token_abc"'), 'token_abc');
+      assert.strictEqual(cleanToken('  "token_abc"  '), 'token_abc');
+      assert.strictEqual(cleanToken('"  token_abc  "'), 'token_abc');
+    });
+
+    test('unquotes single-quoted tokens and trims whitespace', () => {
+      assert.strictEqual(cleanToken("'token_xyz'"), 'token_xyz');
+      assert.strictEqual(cleanToken("  'token_xyz'  "), 'token_xyz');
+    });
+
+    test('preserves clean unquoted tokens unchanged', () => {
+      assert.strictEqual(cleanToken('clean_token_123'), 'clean_token_123');
+      assert.strictEqual(cleanToken('   clean_token_123   '), 'clean_token_123');
+    });
+
+    test('handles edge case quote inputs safely', () => {
+      assert.strictEqual(cleanToken('""'), '');
+      assert.strictEqual(cleanToken("''"), '');
+      assert.strictEqual(cleanToken('"'), '"');
+      assert.strictEqual(cleanToken(''), '');
+    });
+
+    test('handles null, undefined, and non-string inputs safely without throwing', () => {
+      // @ts-ignore
+      assert.strictEqual(cleanToken(null), '');
+      // @ts-ignore
+      assert.strictEqual(cleanToken(undefined), '');
+      // @ts-ignore
+      assert.strictEqual(cleanToken(12345), '');
+    });
   });
 
   // =========================================================================
@@ -144,6 +189,13 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       process.env.VERCEL_AUTOMATION_BYPASS_SECRET = '   \t\n  ';
       assert.strictEqual(getConfiguredBypassSecret(), null);
       assert.deepStrictEqual(getConfiguredBypassSecrets(), []);
+    });
+
+    test('resolves secrets configured with enclosing quotes in environment variable', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = '"quoted_env_secret"';
+      assert.strictEqual(getConfiguredBypassSecret(), 'quoted_env_secret');
+      const secrets = getConfiguredBypassSecrets();
+      assert.ok(secrets.includes('quoted_env_secret'));
     });
   });
 
@@ -231,6 +283,30 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       assert.strictEqual(isAuthorizedAutomationBypass(reqLower), true);
     });
 
+    test('authorizes bypass with Authorization Token scheme and quoted Bearer token', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = TEST_SECRET;
+      const reqToken = new NextRequest('http://localhost:3000/login', {
+        headers: { authorization: `Token ${TEST_SECRET}` },
+      });
+      const reqQuotedBearer = new NextRequest('http://localhost:3000/login', {
+        headers: { authorization: `Bearer "${TEST_SECRET}"` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(reqToken), true);
+      assert.strictEqual(isAuthorizedAutomationBypass(reqQuotedBearer), true);
+    });
+
+    test('authorizes bypass with quoted header value (double and single quotes)', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = TEST_SECRET;
+      const reqDouble = new NextRequest('http://localhost:3000/login', {
+        headers: { 'x-vercel-protection-bypass': `"${TEST_SECRET}"` },
+      });
+      const reqSingle = new NextRequest('http://localhost:3000/login', {
+        headers: { 'x-vercel-protection-bypass': `'${TEST_SECRET}'` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(reqDouble), true);
+      assert.strictEqual(isAuthorizedAutomationBypass(reqSingle), true);
+    });
+
     test('correctly handles whitespace padding in header token', () => {
       process.env.VERCEL_AUTOMATION_BYPASS_SECRET = TEST_SECRET;
       const req = new NextRequest('http://localhost:3000/login', {
@@ -276,6 +352,16 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       assert.strictEqual(isAuthorizedAutomationBypass(req, [explicitSecret, 'other']), true);
       assert.strictEqual(isAuthorizedAutomationBypass(req, 'different_key'), false);
     });
+
+    test('authorizes bypass when request.headers is a plain dictionary object without .get method', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockReq = {
+        headers: {
+          'x-vercel-protection-bypass': VERCEL_SECRET,
+        },
+      } as unknown as NextRequest;
+      assert.strictEqual(isAuthorizedAutomationBypass(mockReq), true);
+    });
   });
 
   // =========================================================================
@@ -314,6 +400,45 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       assert.strictEqual(isAuthorizedAutomationBypass(req), true);
     });
 
+    test('authorizes bypass with RFC 6265 quoted cookie values (double quotes)', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const reqQuoted = new NextRequest('http://localhost:3000/login', {
+        headers: { cookie: `x-vercel-protection-bypass="${VERCEL_SECRET}"` },
+      });
+      const reqQuotedJwt = new NextRequest('http://localhost:3000/login', {
+        headers: { cookie: `_vercel_jwt="${VERCEL_SECRET}"` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(reqQuoted), true);
+      assert.strictEqual(isAuthorizedAutomationBypass(reqQuotedJwt), true);
+    });
+
+    test('authorizes bypass when cookie contains URI-encoded special characters', () => {
+      const specialSecret = 'sec+token=special&char';
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = specialSecret;
+      const encoded = encodeURIComponent(specialSecret);
+      const req = new NextRequest('http://localhost:3000/login', {
+        headers: { cookie: `x-vercel-protection-bypass=${encoded}` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('authorizes bypass when valid cookie is the second of duplicate cookie names in header', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest('http://localhost:3000/login', {
+        headers: { cookie: `x-vercel-protection-bypass=stale_token; x-vercel-protection-bypass=${VERCEL_SECRET}` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('authorizes bypass when cookie value contains percent-encoded quotes', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const encodedQuoted = encodeURIComponent(`"${VERCEL_SECRET}"`);
+      const req = new NextRequest('http://localhost:3000/login', {
+        headers: { cookie: `x-vercel-protection-bypass=${encodedQuoted}` },
+      });
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
     test('rejects forged or invalid cookie value', () => {
       process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
       const req = new NextRequest('http://localhost:3000/login', {
@@ -328,6 +453,65 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
         headers: { cookie: 'x-vercel-protection-bypass=' },
       });
       assert.strictEqual(isAuthorizedAutomationBypass(req), false);
+    });
+  });
+
+  // =========================================================================
+  // 5B. QUERY PARAMETER BYPASS DETECTION & VALIDATION
+  // =========================================================================
+  describe('5B. Bypass Query Parameter Detection & Validation (Vercel Spec)', () => {
+    test('authorizes bypass with x-vercel-protection-bypass query parameter', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest(`http://localhost:3000/login?x-vercel-protection-bypass=${VERCEL_SECRET}`);
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('authorizes bypass with x-agent-bypass-token query parameter', () => {
+      process.env.AGENT_BYPASS_TOKEN = AGENT_SECRET;
+      const req = new NextRequest(`http://localhost:3000/join?x-agent-bypass-token=${AGENT_SECRET}`);
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('authorizes bypass with bypass_token query parameter', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest(`http://localhost:3000/login?bypass_token=${VERCEL_SECRET}`);
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('authorizes bypass with quoted query parameter', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest(`http://localhost:3000/login?x-vercel-protection-bypass="${VERCEL_SECRET}"`);
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('rejects forged or invalid query parameter value', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest('http://localhost:3000/login?x-vercel-protection-bypass=invalid_query_token');
+      assert.strictEqual(isAuthorizedAutomationBypass(req), false);
+    });
+
+    test('authorizes bypass when request.nextUrl is missing and request.url is relative', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockReq = {
+        url: `/login?x-vercel-protection-bypass=${VERCEL_SECRET}`,
+      } as unknown as NextRequest;
+      assert.strictEqual(isAuthorizedAutomationBypass(mockReq), true);
+    });
+
+    test('authorizes bypass when duplicate query parameters exist and the second is valid', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const req = new NextRequest(
+        `http://localhost:3000/login?x-vercel-protection-bypass=stale_token&x-vercel-protection-bypass=${VERCEL_SECRET}`
+      );
+      assert.strictEqual(isAuthorizedAutomationBypass(req), true);
+    });
+
+    test('handles malformed URL in request.url gracefully without crashing', () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockReq = {
+        url: 'http://[invalid-url-domain',
+      } as unknown as NextRequest;
+      assert.strictEqual(isAuthorizedAutomationBypass(mockReq), false);
     });
   });
 
@@ -469,6 +653,97 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
         checkBotIdFn: mockBotCheck,
       });
       assert.strictEqual(resArr.status, 200);
+    });
+
+    test('authorized agent with query parameter on /login passes without calling BotID', async () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+
+      let botIdCalled = false;
+      const mockBotCheck = async () => {
+        botIdCalled = true;
+        return { isBot: true };
+      };
+
+      const req = new NextRequest(`http://localhost:3000/login?x-vercel-protection-bypass=${VERCEL_SECRET}`);
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(botIdCalled, false);
+      assert.strictEqual(res.headers.get('x-automation-bypassed'), '1');
+      assert.strictEqual(res.headers.get('x-is-human'), '1');
+    });
+
+    test('persists bypass cookie when x-vercel-set-bypass-cookie header is provided', async () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockBotCheck = async () => ({ isBot: true });
+
+      const req = new NextRequest('http://localhost:3000/login', {
+        headers: {
+          'x-vercel-protection-bypass': VERCEL_SECRET,
+          'x-vercel-set-bypass-cookie': 'true',
+        },
+      });
+
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 200);
+      const setCookie = res.cookies.get('x-vercel-protection-bypass');
+      assert.ok(setCookie, 'Should set bypass cookie on response');
+      assert.strictEqual(setCookie.value, VERCEL_SECRET);
+    });
+
+    test('persists bypass cookie when x-vercel-set-bypass-cookie query param is provided', async () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockBotCheck = async () => ({ isBot: true });
+
+      const req = new NextRequest(
+        `http://localhost:3000/login?x-vercel-protection-bypass=${VERCEL_SECRET}&x-vercel-set-bypass-cookie=true`
+      );
+
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 200);
+      const setCookie = res.cookies.get('x-vercel-protection-bypass');
+      assert.ok(setCookie, 'Should set bypass cookie on response from query param');
+      assert.strictEqual(setCookie.value, VERCEL_SECRET);
+    });
+
+    test('unquotes quoted bypass secret when persisting bypass cookie', async () => {
+      const quotedSecret = `"${VERCEL_SECRET}"`;
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = quotedSecret;
+      const mockBotCheck = async () => ({ isBot: true });
+
+      const req = new NextRequest('http://localhost:3000/login', {
+        headers: {
+          'x-vercel-protection-bypass': VERCEL_SECRET,
+          'x-vercel-set-bypass-cookie': '1',
+        },
+      });
+
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 200);
+      const setCookie = res.cookies.get('x-vercel-protection-bypass');
+      assert.ok(setCookie, 'Should set bypass cookie on response');
+      assert.strictEqual(setCookie.value, VERCEL_SECRET, 'Cookie value must be unquoted');
+    });
+
+    test('persists bypass cookie when request.nextUrl is missing and query param is on request.url', async () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockBotCheck = async () => ({ isBot: true });
+
+      const req = new NextRequest(
+        `http://localhost:3000/login?x-vercel-protection-bypass=${VERCEL_SECRET}&x-vercel-set-bypass-cookie=1`
+      );
+      // Simulate environment where nextUrl is not provided
+      Object.defineProperty(req, 'nextUrl', { value: undefined, configurable: true });
+
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 200);
+      const setCookie = res.cookies.get('x-vercel-protection-bypass');
+      assert.ok(setCookie, 'Should set bypass cookie from request.url query param fallback');
+      assert.strictEqual(setCookie.value, VERCEL_SECRET);
     });
   });
 
@@ -642,6 +917,19 @@ describe('Vercel BotID Middleware & Authorized Automation Bypass (R1 & R2)', () 
       assert.strictEqual(res.headers.get('x-automation-bypassed'), '1');
       assert.strictEqual(res.headers.get('x-is-human'), '1');
       assert.strictEqual(res.headers.get('x-middleware-request-x-is-human'), '1');
+    });
+
+    test('bot request with fake query parameter token is blocked with 401', async () => {
+      process.env.VERCEL_AUTOMATION_BYPASS_SECRET = VERCEL_SECRET;
+      const mockBotCheck = async () => ({ isBot: true });
+
+      const req = new NextRequest('http://localhost:3000/login?x-vercel-protection-bypass=fake_param_secret');
+
+      const res = await middleware(req, { checkBotIdFn: mockBotCheck });
+
+      assert.strictEqual(res.status, 401);
+      const body = await res.json();
+      assert.strictEqual(body.error, 'bot_detected');
     });
   });
 });

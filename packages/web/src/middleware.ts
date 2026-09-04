@@ -34,8 +34,39 @@ export const AUTOMATION_BYPASS_COOKIES = [
 ] as const;
 
 /**
+ * Supported query parameters for authorized automation bypass.
+ * Enables automation bypass for browsers, test runners, and webhooks
+ * per Vercel's official Protection Bypass for Automation specification.
+ */
+export const AUTOMATION_BYPASS_QUERY_PARAMS = [
+  "x-vercel-protection-bypass",
+  "x-agent-bypass-token",
+  "x-automation-bypass-secret",
+  "bypass_token",
+  "bypass-secret",
+] as const;
+
+/**
+ * Strips surrounding single or double quotes and trims whitespace.
+ * RFC 6265 allows cookie values to be enclosed in DQUOTE pairs: "cookie-value".
+ * HTTP clients/headers may also enclose tokens in quotes.
+ */
+export function cleanToken(token: string): string {
+  if (!token || typeof token !== "string") return "";
+  let val = token.trim();
+  if (
+    (val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+    (val.startsWith("'") && val.endsWith("'") && val.length >= 2)
+  ) {
+    val = val.slice(1, -1).trim();
+  }
+  return val;
+}
+
+/**
  * Constant-time comparison between two strings to prevent timing attacks.
  * Uses XOR-accumulation over full length to avoid timing leakage.
+ * Rejects oversized inputs (> 4096 chars) to prevent CPU starvation attacks.
  */
 export function timingSafeEqual(a: string, b: string): boolean {
   if (typeof a !== "string" || typeof b !== "string") return false;
@@ -43,6 +74,10 @@ export function timingSafeEqual(a: string, b: string): boolean {
 
   const aLen = a.length;
   const bLen = b.length;
+
+  // Sanity check against CPU exhaustion with multi-megabyte payloads
+  if (aLen > 4096 || bLen > 4096) return false;
+
   const maxLen = Math.max(aLen, bLen);
   let result = aLen ^ bLen;
 
@@ -70,9 +105,15 @@ export function getConfiguredBypassSecrets(): string[] {
 
   const secrets: string[] = [];
   for (const candidate of candidates) {
-    const trimmed = candidate?.trim();
-    if (trimmed && trimmed.length > 0 && !secrets.includes(trimmed)) {
-      secrets.push(trimmed);
+    if (!candidate || typeof candidate !== "string") continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    const cleaned = cleanToken(trimmed);
+
+    for (const sec of [cleaned, trimmed]) {
+      if (sec.length > 0 && !secrets.includes(sec)) {
+        secrets.push(sec);
+      }
     }
   }
 
@@ -91,7 +132,8 @@ export function getConfiguredBypassSecret(): string | null {
  * Verifies if the request carries a valid pre-shared secret token authorizing
  * BotID bypass for automated testing and auditing agents.
  * Supports standard bypass headers (x-vercel-protection-bypass, x-agent-bypass-token, etc.),
- * cookies (x-vercel-protection-bypass, _vercel_jwt, etc.), and Authorization Bearer header.
+ * cookies (x-vercel-protection-bypass, _vercel_jwt, etc.), query parameters,
+ * and Authorization Bearer / Token headers.
  */
 export function isAuthorizedAutomationBypass(
   request: NextRequest,
@@ -100,12 +142,27 @@ export function isAuthorizedAutomationBypass(
   let secrets: string[];
   if (configuredSecret !== undefined) {
     if (Array.isArray(configuredSecret)) {
-      secrets = configuredSecret
-        .map((s) => (typeof s === "string" ? s.trim() : ""))
-        .filter((s) => s.length > 0);
+      secrets = [];
+      for (const s of configuredSecret) {
+        if (typeof s === "string") {
+          const trimmed = s.trim();
+          const cleaned = cleanToken(trimmed);
+          for (const item of [cleaned, trimmed]) {
+            if (item.length > 0 && !secrets.includes(item)) {
+              secrets.push(item);
+            }
+          }
+        }
+      }
     } else if (typeof configuredSecret === "string") {
       const trimmed = configuredSecret.trim();
-      secrets = trimmed.length > 0 ? [trimmed] : [];
+      const cleaned = cleanToken(trimmed);
+      secrets = [];
+      for (const item of [cleaned, trimmed]) {
+        if (item.length > 0 && !secrets.includes(item)) {
+          secrets.push(item);
+        }
+      }
     } else {
       secrets = [];
     }
@@ -119,8 +176,33 @@ export function isAuthorizedAutomationBypass(
   }
 
   const matchesAnySecret = (candidate: string): boolean => {
+    const trimmed = candidate.trim();
+    if (!trimmed) return false;
+    const cleaned = cleanToken(trimmed);
+
+    let decoded = trimmed;
+    try {
+      decoded = decodeURIComponent(trimmed);
+    } catch {
+      // Keep raw
+    }
+    const cleanedDecoded = cleanToken(decoded);
+
     for (const secret of secrets) {
-      if (timingSafeEqual(candidate, secret)) {
+      if (timingSafeEqual(trimmed, secret)) {
+        return true;
+      }
+      if (cleaned !== trimmed && timingSafeEqual(cleaned, secret)) {
+        return true;
+      }
+      if (decoded !== trimmed && timingSafeEqual(decoded, secret)) {
+        return true;
+      }
+      if (
+        cleanedDecoded !== decoded &&
+        cleanedDecoded !== cleaned &&
+        timingSafeEqual(cleanedDecoded, secret)
+      ) {
         return true;
       }
     }
@@ -129,46 +211,92 @@ export function isAuthorizedAutomationBypass(
 
   // 1. Check candidate bypass headers
   for (const headerName of AUTOMATION_BYPASS_HEADERS) {
-    const value = request.headers?.get?.(headerName);
+    let value = request.headers?.get?.(headerName);
+    if (!value && request.headers && typeof (request.headers as any)[headerName] === "string") {
+      value = (request.headers as any)[headerName];
+    }
     if (value && typeof value === "string") {
-      const candidate = value.trim();
-      if (candidate && matchesAnySecret(candidate)) {
+      if (matchesAnySecret(value)) {
         return true;
       }
     }
   }
 
-  // 2. Check candidate bypass cookies
+  // 2. Check candidate bypass cookies (supports getAll, get, and raw Cookie header)
   for (const cookieName of AUTOMATION_BYPASS_COOKIES) {
-    let cookieVal = request.cookies?.get?.(cookieName)?.value;
-    if (!cookieVal && request.headers) {
-      const rawCookie = request.headers?.get?.("cookie");
+    // NextRequest cookies.getAll() if present
+    const cookieList = request.cookies?.getAll?.(cookieName);
+    if (cookieList && cookieList.length > 0) {
+      for (const c of cookieList) {
+        if (c?.value && typeof c.value === "string" && matchesAnySecret(c.value)) {
+          return true;
+        }
+      }
+    } else {
+      const single = request.cookies?.get?.(cookieName)?.value;
+      if (single && typeof single === "string" && matchesAnySecret(single)) {
+        return true;
+      }
+    }
+
+    // Fallback: parse raw cookie header directly
+    if (request.headers) {
+      const rawCookie = request.headers.get("cookie") || request.headers.get("Cookie");
       if (rawCookie) {
-        const match = new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`).exec(rawCookie);
-        if (match) {
+        const cookieRegex = new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`, "g");
+        let m: RegExpExecArray | null;
+        while ((m = cookieRegex.exec(rawCookie)) !== null) {
+          let val = m[1].trim();
           try {
-            cookieVal = decodeURIComponent(match[1]);
+            val = decodeURIComponent(val);
           } catch {
-            cookieVal = match[1];
+            // Keep raw if URI decode fails
+          }
+          if (val && matchesAnySecret(val)) {
+            return true;
           }
         }
       }
     }
-    if (cookieVal && typeof cookieVal === "string") {
-      const candidate = cookieVal.trim();
-      if (candidate && matchesAnySecret(candidate)) {
-        return true;
+  }
+
+  // 3. Check candidate bypass query parameters (standard Vercel protection bypass feature)
+  let searchParams: URLSearchParams | null = null;
+  if (request.nextUrl?.searchParams) {
+    searchParams = request.nextUrl.searchParams;
+  } else if (request.url) {
+    try {
+      searchParams = new URL(request.url, "http://localhost").searchParams;
+    } catch {
+      searchParams = null;
+    }
+  }
+
+  if (searchParams) {
+    for (const paramName of AUTOMATION_BYPASS_QUERY_PARAMS) {
+      const values =
+        typeof searchParams.getAll === "function"
+          ? searchParams.getAll(paramName)
+          : [searchParams.get(paramName)];
+      for (const value of values) {
+        if (value && typeof value === "string") {
+          if (matchesAnySecret(value)) {
+            return true;
+          }
+        }
       }
     }
   }
 
-  // 3. Fallback: check Authorization Bearer token (case-insensitive "Bearer")
-  const auth = request.headers?.get?.("authorization") || request.headers?.get?.("Authorization");
+  // 4. Fallback: check Authorization Bearer or Token header (case-insensitive)
+  const auth =
+    request.headers?.get?.("authorization") ||
+    request.headers?.get?.("Authorization");
   if (auth && typeof auth === "string") {
-    const match = /^Bearer\s+(.+)$/i.exec(auth.trim());
+    const match = /^(?:Bearer|Token)\s+(.+)$/i.exec(auth.trim());
     if (match) {
-      const bearer = match[1].trim();
-      if (bearer && matchesAnySecret(bearer)) {
+      const token = match[1].trim();
+      if (token && matchesAnySecret(token)) {
         return true;
       }
     }
@@ -196,9 +324,9 @@ export interface MiddlewareOptions {
  *
  * Automation Bypass Mechanism:
  *  - Trusted testing/audit agents passing the pre-shared secret token
- *    (via `x-vercel-protection-bypass`, `x-agent-bypass-token`, cookies, or
- *    supported bypass headers) bypass the BotID/Kasada challenge, allowing
- *    automated audits without interference.
+ *    (via `x-vercel-protection-bypass`, `x-agent-bypass-token`, cookies,
+ *    query parameters, or supported bypass headers) bypass the BotID/Kasada challenge,
+ *    allowing automated audits without interference.
  *  - When bypassed or verified human, `x-is-human: 1` is forwarded
  *    to downstream routes so subsequent actions skip secondary bot heuristics.
  *
@@ -231,6 +359,41 @@ export async function middleware(
     response.headers.set("x-is-human", "1");
     response.headers.set("x-automation-bypassed", "1");
     response.headers.set("x-botid-bypassed", "1");
+
+    // Standard Vercel Automation Bypass: persist cookie if requested
+    let searchParams: URLSearchParams | null = null;
+    if (request.nextUrl?.searchParams) {
+      searchParams = request.nextUrl.searchParams;
+    } else if (request.url) {
+      try {
+        searchParams = new URL(request.url, "http://localhost").searchParams;
+      } catch {
+        searchParams = null;
+      }
+    }
+
+    const shouldSetCookie =
+      request.headers?.get?.("x-vercel-set-bypass-cookie") === "true" ||
+      request.headers?.get?.("x-vercel-set-bypass-cookie") === "1" ||
+      searchParams?.get("x-vercel-set-bypass-cookie") === "true" ||
+      searchParams?.get("x-vercel-set-bypass-cookie") === "1";
+
+    if (shouldSetCookie) {
+      const rawSecret = options?.bypassSecret
+        ? (Array.isArray(options.bypassSecret) ? options.bypassSecret[0] : options.bypassSecret)
+        : getConfiguredBypassSecret();
+      const primarySecret = rawSecret ? cleanToken(rawSecret) : null;
+      if (primarySecret) {
+        response.cookies.set("x-vercel-protection-bypass", primarySecret, {
+          path: "/",
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 86400 * 30, // 30 days
+        });
+      }
+    }
+
     return response;
   }
 
