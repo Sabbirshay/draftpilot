@@ -207,11 +207,44 @@ export const DEMO_STATS = {
 };
 
 export function resolveDemoTicket(idOrCategory?: string): DemoTicket {
-  if (!idOrCategory) return DEMO_TICKETS[0];
-  const found = DEMO_TICKETS.find(
-    (t) => t.id === idOrCategory || t.category === idOrCategory
+  if (!idOrCategory || typeof idOrCategory !== 'string') return DEMO_TICKETS[0];
+  const normalized = idOrCategory.toLowerCase().trim();
+  if (!normalized) return DEMO_TICKETS[0];
+
+  // Direct exact match on id or category (case-insensitive)
+  const exact = DEMO_TICKETS.find(
+    (t) => t.id.toLowerCase() === normalized || t.category.toLowerCase() === normalized
   );
-  return found || DEMO_TICKETS[0];
+  if (exact) return exact;
+
+  // Semantic alias matching for common ticket categories
+  if (normalized.includes('ship')) {
+    return DEMO_TICKETS.find((t) => t.id === 'ticket-shipping') || DEMO_TICKETS[0];
+  }
+  if (
+    normalized.includes('pass') ||
+    normalized.includes('auth') ||
+    normalized.includes('2fa') ||
+    normalized.includes('lock')
+  ) {
+    return DEMO_TICKETS.find((t) => t.id === 'ticket-password') || DEMO_TICKETS[0];
+  }
+  if (
+    normalized.includes('bill') ||
+    normalized.includes('invoice') ||
+    normalized.includes('prorate')
+  ) {
+    return DEMO_TICKETS.find((t) => t.id === 'ticket-billing') || DEMO_TICKETS[0];
+  }
+  if (
+    normalized.includes('refund') ||
+    normalized.includes('return') ||
+    normalized.includes('damage')
+  ) {
+    return DEMO_TICKETS.find((t) => t.id === 'ticket-refund') || DEMO_TICKETS[0];
+  }
+
+  return DEMO_TICKETS[0];
 }
 
 export function synthesizeDemoDraft(

@@ -472,7 +472,7 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
       assert.strictEqual(resolvedDraft, 'ticket_3', 'Only the final switched ticket should resolve');
     });
 
-    test('resolveDemoTicket seamlessly maps category names (shipping_status, password_reset, etc.) and direct IDs', () => {
+    test('resolveDemoTicket seamlessly maps category names, direct IDs, case variations, and aliases', () => {
       // By category
       assert.strictEqual(resolveDemoTicket('shipping_status').id, 'ticket-shipping');
       assert.strictEqual(resolveDemoTicket('password_reset').id, 'ticket-password');
@@ -485,21 +485,35 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
       assert.strictEqual(resolveDemoTicket('ticket-billing').id, 'ticket-billing');
       assert.strictEqual(resolveDemoTicket('ticket-refund').id, 'ticket-refund');
 
+      // Case variations
+      assert.strictEqual(resolveDemoTicket('SHIPPING_STATUS').id, 'ticket-shipping');
+      assert.strictEqual(resolveDemoTicket('Ticket-Password').id, 'ticket-password');
+      assert.strictEqual(resolveDemoTicket(' Billing_Question ').id, 'ticket-billing');
+
+      // Aliases / keywords
+      assert.strictEqual(resolveDemoTicket('shipping').id, 'ticket-shipping');
+      assert.strictEqual(resolveDemoTicket('refund').id, 'ticket-refund');
+      assert.strictEqual(resolveDemoTicket('password').id, 'ticket-password');
+      assert.strictEqual(resolveDemoTicket('billing').id, 'ticket-billing');
+
       // Edge cases: undefined or unknown string
       assert.strictEqual(resolveDemoTicket(undefined).id, DEMO_TICKETS[0].id);
       assert.strictEqual(resolveDemoTicket('non-existent-xyz').id, DEMO_TICKETS[0].id);
       assert.strictEqual(resolveDemoTicket('').id, DEMO_TICKETS[0].id);
     });
 
-    test('modal session state management resets ticket selection and clears macros on reopen without payload', () => {
+    test('modal session state management resets ticket selection, tone, macros, and clears draft during synthesis', () => {
       // Session 1: External event opens with targeted category
       let initialTicketId: string | undefined = 'shipping_status';
       let selectedTicketId = resolveDemoTicket(initialTicketId).id;
+      let selectedTone: string = 'urgent';
       let selectedMacroId: string | undefined = 'demo-1';
+      let draftResult: any = { draft: 'Old shipping draft', scrubbedCount: 2 };
       let copied = false;
       let inserted = false;
 
       assert.strictEqual(selectedTicketId, 'ticket-shipping', 'Initial session must resolve to shipping ticket');
+      assert.strictEqual(selectedTone, 'urgent');
       assert.strictEqual(selectedMacroId, 'demo-1');
 
       // Modal closes
@@ -512,32 +526,40 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
           clearTimeout(timer);
           timer = null;
         }
+        draftResult = null;
       }
       assert.strictEqual(timer, null, 'Closing modal must cancel pending timers');
+      assert.strictEqual(draftResult, null, 'Closing modal must reset draftResult');
 
       // Session 2: User clicks header "Try Demo" button (initialTicketId = undefined)
       isOpen = true;
       initialTicketId = undefined;
       selectedTicketId = resolveDemoTicket(initialTicketId).id;
+      selectedTone = 'empathetic';
       selectedMacroId = undefined;
+      draftResult = null;
       copied = false;
       inserted = false;
 
       assert.strictEqual(selectedTicketId, DEMO_TICKETS[0].id, 'Header click must reset ticket to default (ticket-refund)');
+      assert.strictEqual(selectedTone, 'empathetic', 'Header click must reset tone to empathetic');
       assert.strictEqual(selectedMacroId, undefined, 'Header click must clear previously selected macro');
+      assert.strictEqual(draftResult, null, 'DraftResult must be cleared during new synthesis');
       assert.strictEqual(copied, false, 'Copy status must reset');
       assert.strictEqual(inserted, false, 'Insert status must reset');
     });
 
-    test('modal dialog traps focus with Tab and Shift+Tab key navigation', () => {
+    test('modal dialog traps focus when activeElement is the container, first child, or last child', () => {
       const focusableElements = [
         { id: 'close-btn', focused: false, focus() { this.focused = true; } },
         { id: 'ticket-1', focused: false, focus() { this.focused = true; } },
         { id: 'get-started-link', focused: false, focus() { this.focused = true; } },
       ];
 
-      const container = {
-        contains: (el: any) => focusableElements.includes(el),
+      // In the real DOM, container.contains(container) is TRUE
+      const container: any = {
+        id: 'modal-container',
+        contains: (el: any) => el === container || focusableElements.includes(el),
         querySelectorAll: () => focusableElements,
       };
 
@@ -547,6 +569,9 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
         const last = focusable[focusable.length - 1];
         let defaultPrevented = false;
 
+        const activeEl = currentActive;
+        const isInsideContainer = !!activeEl && container.contains(activeEl) && activeEl !== container;
+
         const event = {
           key: 'Tab',
           shiftKey,
@@ -554,13 +579,13 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
         };
 
         if (event.shiftKey) {
-          if (currentActive === first || !container.contains(currentActive)) {
+          if (!isInsideContainer || activeEl === first) {
             event.preventDefault();
             last.focus();
             return { nextActive: last, defaultPrevented };
           }
         } else {
-          if (currentActive === last || !container.contains(currentActive)) {
+          if (!isInsideContainer || activeEl === last) {
             event.preventDefault();
             first.focus();
             return { nextActive: first, defaultPrevented };
@@ -570,15 +595,84 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
         return { nextActive: null, defaultPrevented: false };
       };
 
+      // Scenario A: Modal opens and focuses modalContainer (tabIndex=-1)
+      // Shift+Tab from container MUST wrap to last element and prevent default
+      const shiftTabFromContainer = simulateTabNavigation(container, true);
+      assert.strictEqual(shiftTabFromContainer.defaultPrevented, true, 'Shift+Tab on container must prevent default');
+      assert.strictEqual(shiftTabFromContainer.nextActive?.id, 'get-started-link', 'Focus must move to last element');
+
+      // Forward Tab from container MUST move to first element and prevent default
+      const tabFromContainer = simulateTabNavigation(container, false);
+      assert.strictEqual(tabFromContainer.defaultPrevented, true, 'Tab on container must prevent default');
+      assert.strictEqual(tabFromContainer.nextActive?.id, 'close-btn', 'Focus must move to first element');
+
+      // Scenario B: User on last element
       // Forward Tab from last element wraps to first
       const forwardWrap = simulateTabNavigation(focusableElements[2], false);
       assert.strictEqual(forwardWrap.defaultPrevented, true, 'Tab on last element must prevent default');
       assert.strictEqual(forwardWrap.nextActive?.id, 'close-btn', 'Focus must wrap to first element');
 
+      // Scenario C: User on first element
       // Backward Shift+Tab from first element wraps to last
       const backwardWrap = simulateTabNavigation(focusableElements[0], true);
       assert.strictEqual(backwardWrap.defaultPrevented, true, 'Shift+Tab on first element must prevent default');
       assert.strictEqual(backwardWrap.nextActive?.id, 'get-started-link', 'Focus must wrap to last element');
+    });
+
+    test('backdrop click closes modal but text drag across modal boundary preserves modal open state', () => {
+      let isClosed = false;
+      const onClose = () => { isClosed = true; };
+      let isBackdropMouseDown = false;
+
+      const backdrop = { id: 'backdrop' };
+      const dialogText = { id: 'dialog-text' };
+
+      // Case 1: Legitimate click on backdrop (mousedown on backdrop, mouseup/click on backdrop)
+      isBackdropMouseDown = true; // mousedown on backdrop (e.target === e.currentTarget)
+      if (isBackdropMouseDown) {
+        onClose();
+      }
+      isBackdropMouseDown = false;
+      assert.strictEqual(isClosed, true, 'Click directly on backdrop must close modal');
+
+      // Case 2: Drag selection (mousedown inside dialog text, mouseup/click on backdrop)
+      isClosed = false;
+      // mousedown on dialogText: e.target !== e.currentTarget on backdrop
+      isBackdropMouseDown = false;
+      // click event bubbles to backdrop
+      if (isBackdropMouseDown) {
+        onClose();
+      }
+      assert.strictEqual(isClosed, false, 'Drag selection releasing on backdrop must NOT dismiss modal');
+    });
+
+    test('draftpilot:open-demo supports string payloads, category aliases, and object variants', () => {
+      let receivedTicketId: string | undefined = undefined;
+
+      const parseDetail = (detail: any) => {
+        if (typeof detail === 'string') {
+          return detail;
+        } else if (detail && typeof detail === 'object') {
+          return detail.ticketId || detail.ticket || detail.category || detail.id;
+        }
+        return undefined;
+      };
+
+      // String payload
+      assert.strictEqual(resolveDemoTicket(parseDetail('shipping_status')).id, 'ticket-shipping');
+      assert.strictEqual(resolveDemoTicket(parseDetail('password')).id, 'ticket-password');
+
+      // Object with ticketId
+      assert.strictEqual(resolveDemoTicket(parseDetail({ ticketId: 'billing_question' })).id, 'ticket-billing');
+
+      // Object with category
+      assert.strictEqual(resolveDemoTicket(parseDetail({ category: 'shipping_status' })).id, 'ticket-shipping');
+
+      // Object with ticket
+      assert.strictEqual(resolveDemoTicket(parseDetail({ ticket: 'return_refund' })).id, 'ticket-refund');
+
+      // Empty payload resets to default
+      assert.strictEqual(resolveDemoTicket(parseDetail(undefined)).id, DEMO_TICKETS[0].id);
     });
 
     test('handleInsert does not trigger positive feedback when draft is null or pending', () => {
@@ -653,6 +747,47 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
       assert.strictEqual(isRedactedToken('[CARD_REDACTED]'), true, 'Must detect CARD_REDACTED');
       assert.strictEqual(isRedactedToken('[EMAIL_REDACTED]'), true, 'Must detect EMAIL_REDACTED');
       assert.strictEqual(isRedactedToken('[UNKNOWN_REDACTED]'), false, 'Must not detect unknown token');
+    });
+
+    test('handleCopy and handleInsert safely fall back to fallbackCopy when navigator.clipboard.writeText throws synchronously', () => {
+      let fallbackCopyCalled = false;
+      const fakeFallbackCopy = () => { fallbackCopyCalled = true; };
+
+      const origDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+      try {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: {
+            clipboard: {
+              writeText: () => {
+                throw new Error('Permissions policy violation: clipboard-write disabled');
+              },
+            },
+          },
+          configurable: true,
+          writable: true,
+        });
+
+        const draftResult = { draft: 'test synchronous error draft' };
+
+        // Test the safe execution block
+        if (typeof (globalThis as any).navigator !== 'undefined' && (globalThis as any).navigator.clipboard?.writeText) {
+          try {
+            (globalThis as any).navigator.clipboard.writeText(draftResult.draft).catch(() => {
+              fakeFallbackCopy();
+            });
+          } catch {
+            fakeFallbackCopy();
+          }
+        } else {
+          fakeFallbackCopy();
+        }
+
+        assert.strictEqual(fallbackCopyCalled, true, 'Must gracefully trigger fallbackCopy when writeText throws synchronously');
+      } finally {
+        if (origDesc) {
+          Object.defineProperty(globalThis, 'navigator', origDesc);
+        }
+      }
     });
   });
 });

@@ -37,6 +37,7 @@ export default function TryDemoModeModal({
   const insertedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);
+  const isBackdropMouseDownRef = useRef<boolean>(false);
 
   const currentTicket = DEMO_TICKETS.find((t) => t.id === selectedTicketId) || DEMO_TICKETS[0];
 
@@ -45,7 +46,9 @@ export default function TryDemoModeModal({
     if (isOpen) {
       const resolved = resolveDemoTicket(initialTicketId);
       setSelectedTicketId(resolved.id);
+      setSelectedTone('empathetic');
       setSelectedMacroId(undefined);
+      setDraftResult(null);
       setCopied(false);
       setInserted(false);
     } else {
@@ -63,6 +66,7 @@ export default function TryDemoModeModal({
         insertedTimeoutRef.current = null;
       }
       setIsGenerating(false);
+      setDraftResult(null);
     }
   }, [isOpen, initialTicketId]);
 
@@ -107,6 +111,7 @@ export default function TryDemoModeModal({
   const handleGenerate = (ticket: DemoTicket, tone: string, macroId?: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setIsGenerating(true);
+    setDraftResult(null);
     setInserted(false);
 
     timerRef.current = setTimeout(() => {
@@ -149,14 +154,16 @@ export default function TryDemoModeModal({
 
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
+        const activeEl = document.activeElement as HTMLElement | null;
+        const isInsideContainer = !!activeEl && container.contains(activeEl) && activeEl !== container;
 
         if (e.shiftKey) {
-          if (document.activeElement === first || !container.contains(document.activeElement)) {
+          if (!isInsideContainer || activeEl === first) {
             e.preventDefault();
             last.focus();
           }
         } else {
-          if (document.activeElement === last || !container.contains(document.activeElement)) {
+          if (!isInsideContainer || activeEl === last) {
             e.preventDefault();
             first.focus();
           }
@@ -192,9 +199,13 @@ export default function TryDemoModeModal({
   const handleCopy = () => {
     if (draftResult) {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(draftResult.draft).catch(() => {
+        try {
+          navigator.clipboard.writeText(draftResult.draft).catch(() => {
+            fallbackCopy(draftResult.draft);
+          });
+        } catch {
           fallbackCopy(draftResult.draft);
-        });
+        }
       } else {
         fallbackCopy(draftResult.draft);
       }
@@ -207,9 +218,13 @@ export default function TryDemoModeModal({
   const handleInsert = () => {
     if (draftResult) {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(draftResult.draft).catch(() => {
+        try {
+          navigator.clipboard.writeText(draftResult.draft).catch(() => {
+            fallbackCopy(draftResult.draft);
+          });
+        } catch {
           fallbackCopy(draftResult.draft);
-        });
+        }
       } else {
         fallbackCopy(draftResult.draft);
       }
@@ -251,13 +266,24 @@ export default function TryDemoModeModal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto"
-          onClick={onClose}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              isBackdropMouseDownRef.current = true;
+            }
+          }}
+          onClick={(e) => {
+            if (isBackdropMouseDownRef.current && e.target === e.currentTarget) {
+              onClose();
+            }
+            isBackdropMouseDownRef.current = false;
+          }}
           data-testid="demo-modal-backdrop"
         >
           <motion.div
             ref={modalContainerRef}
             tabIndex={-1}
             key="demo-modal-dialog"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}

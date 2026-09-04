@@ -58,12 +58,21 @@ export default function DashboardHeader({
   // Listen for global draftpilot:open-demo custom events to open the interactive sandbox
   useEffect(() => {
     const handleOpenDemo = (event?: Event) => {
-      const customEvent = event as CustomEvent<{ ticketId?: string }> | undefined;
-      if (customEvent?.detail?.ticketId) {
-        setDemoTicketId(customEvent.detail.ticketId);
-      } else {
-        setDemoTicketId(undefined);
+      const customEvent = event as CustomEvent | undefined;
+      const detail = customEvent?.detail;
+      let ticketId: string | undefined;
+
+      if (typeof detail === 'string') {
+        ticketId = detail;
+      } else if (detail && typeof detail === 'object') {
+        ticketId =
+          (detail as any).ticketId ||
+          (detail as any).ticket ||
+          (detail as any).category ||
+          (detail as any).id;
       }
+
+      setDemoTicketId(ticketId);
       setIsDemoModalOpen(true);
       onTryDemoClickRef.current?.();
     };
@@ -176,9 +185,7 @@ export default function DashboardHeader({
             onClick={() => {
               setDemoTicketId(undefined);
               setIsDemoModalOpen(true);
-              if (onTryDemoClick) {
-                onTryDemoClick();
-              }
+              onTryDemoClickRef.current?.();
             }}
             aria-label="Try Demo Mode"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-accent/20 to-cyan/20 hover:from-accent/30 hover:to-cyan/30 border border-accent/40 text-text text-xs font-semibold transition-all shadow-[0_0_12px_rgba(124,58,237,0.25)] cursor-pointer"
