@@ -8,6 +8,7 @@ import {
   DemoTicket,
   DemoDraftResult,
   synthesizeDemoDraft,
+  resolveDemoTicket,
 } from '@/data/demo-data';
 
 interface TryDemoModeModalProps {
@@ -22,10 +23,7 @@ export default function TryDemoModeModal({
   initialTicketId,
 }: TryDemoModeModalProps) {
   const [selectedTicketId, setSelectedTicketId] = useState<string>(() => {
-    if (initialTicketId && DEMO_TICKETS.some((t) => t.id === initialTicketId)) {
-      return initialTicketId;
-    }
-    return DEMO_TICKETS[0].id;
+    return resolveDemoTicket(initialTicketId).id;
   });
   const [selectedTone, setSelectedTone] = useState<'empathetic' | 'concise' | 'formal' | 'urgent'>('empathetic');
   const [selectedMacroId, setSelectedMacroId] = useState<string | undefined>(undefined);
@@ -42,13 +40,29 @@ export default function TryDemoModeModal({
 
   const currentTicket = DEMO_TICKETS.find((t) => t.id === selectedTicketId) || DEMO_TICKETS[0];
 
-  // Sync initialTicketId if provided prop changes and is valid
+  // Sync and reset state when modal opens or initialTicketId changes
   useEffect(() => {
-    if (isOpen && initialTicketId) {
-      const valid = DEMO_TICKETS.some((t) => t.id === initialTicketId);
-      if (valid) {
-        setSelectedTicketId(initialTicketId);
+    if (isOpen) {
+      const resolved = resolveDemoTicket(initialTicketId);
+      setSelectedTicketId(resolved.id);
+      setSelectedMacroId(undefined);
+      setCopied(false);
+      setInserted(false);
+    } else {
+      // Clear timers and reset pending generation when modal closes
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
+      if (copiedTimeoutRef.current) {
+        clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = null;
+      }
+      if (insertedTimeoutRef.current) {
+        clearTimeout(insertedTimeoutRef.current);
+        insertedTimeoutRef.current = null;
+      }
+      setIsGenerating(false);
     }
   }, [isOpen, initialTicketId]);
 
@@ -78,10 +92,14 @@ export default function TryDemoModeModal({
     return () => {
       document.body.style.overflow = originalOverflow;
       clearTimeout(focusTimer);
-      if (previousActiveElementRef.current) {
+      if (
+        previousActiveElementRef.current &&
+        typeof document !== 'undefined' &&
+        document.contains(previousActiveElementRef.current)
+      ) {
         previousActiveElementRef.current.focus?.();
-        previousActiveElementRef.current = null;
       }
+      previousActiveElementRef.current = null;
     };
   }, [isOpen]);
 
@@ -105,11 +123,45 @@ export default function TryDemoModeModal({
     }
   }, [isOpen, selectedTicketId, selectedTone, selectedMacroId]);
 
-  // Handle ESC key to close
+  // Handle ESC key to close and Tab key focus trapping
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        const container = modalContainerRef.current;
+        if (!container) return;
+
+        const focusable = container.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+
+        if (!focusable || focusable.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || !container.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !container.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -117,16 +169,21 @@ export default function TryDemoModeModal({
 
   const fallbackCopy = (text: string) => {
     if (typeof document === 'undefined') return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     try {
       const textArea = document.createElement('textarea');
       textArea.value = text;
       textArea.style.position = 'fixed';
       textArea.style.left = '-9999px';
+      textArea.setAttribute('aria-hidden', 'true');
       document.body.appendChild(textArea);
       textArea.focus();
       textArea.select();
       document.execCommand('copy');
       document.body.removeChild(textArea);
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus?.();
+      }
     } catch {
       // Ignore fallback copy errors
     }
@@ -150,20 +207,24 @@ export default function TryDemoModeModal({
   const handleInsert = () => {
     if (draftResult) {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(draftResult.draft).catch(() => {});
+        navigator.clipboard.writeText(draftResult.draft).catch(() => {
+          fallbackCopy(draftResult.draft);
+        });
+      } else {
+        fallbackCopy(draftResult.draft);
       }
+      setInserted(true);
+      if (insertedTimeoutRef.current) clearTimeout(insertedTimeoutRef.current);
+      insertedTimeoutRef.current = setTimeout(() => setInserted(false), 3000);
     }
-    setInserted(true);
-    if (insertedTimeoutRef.current) clearTimeout(insertedTimeoutRef.current);
-    insertedTimeoutRef.current = setTimeout(() => setInserted(false), 3000);
   };
 
   // Highlight PII tokens in redacted text without stateful regex issues
   const isRedactedToken = (str: string) =>
-    /^\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\]$/.test(str);
+    /^\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS|CUSTOM)_REDACTED\]$/.test(str);
 
   const renderHighlightedRedaction = (text: string) => {
-    const parts = text.split(/(\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\])/g);
+    const parts = text.split(/(\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS|CUSTOM)_REDACTED\])/g);
 
     return parts.map((part, idx) => {
       if (isRedactedToken(part)) {
@@ -488,7 +549,8 @@ export default function TryDemoModeModal({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={handleCopy}
-                      className="px-3.5 py-1.5 rounded-xl bg-elevated hover:bg-border border border-border text-xs font-semibold text-text transition-colors flex items-center gap-1.5 cursor-pointer"
+                      disabled={isGenerating || !draftResult}
+                      className="px-3.5 py-1.5 rounded-xl bg-elevated hover:bg-border border border-border text-xs font-semibold text-text transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {copied ? (
                         <>
@@ -505,7 +567,8 @@ export default function TryDemoModeModal({
 
                     <button
                       onClick={handleInsert}
-                      className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      disabled={isGenerating || !draftResult}
+                      className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                         inserted
                           ? 'bg-emerald-600 text-white'
                           : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'

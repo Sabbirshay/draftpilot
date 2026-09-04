@@ -49,6 +49,11 @@ export default function DashboardHeader({
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [demoTicketId, setDemoTicketId] = useState<string | undefined>(undefined);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const onTryDemoClickRef = useRef(onTryDemoClick);
+
+  useEffect(() => {
+    onTryDemoClickRef.current = onTryDemoClick;
+  });
 
   // Listen for global draftpilot:open-demo custom events to open the interactive sandbox
   useEffect(() => {
@@ -60,13 +65,13 @@ export default function DashboardHeader({
         setDemoTicketId(undefined);
       }
       setIsDemoModalOpen(true);
-      onTryDemoClick?.();
+      onTryDemoClickRef.current?.();
     };
     window.addEventListener('draftpilot:open-demo', handleOpenDemo);
     return () => {
       window.removeEventListener('draftpilot:open-demo', handleOpenDemo);
     };
-  }, [onTryDemoClick]);
+  }, []);
 
   // Close profile dropdown on click outside
   useEffect(() => {
@@ -167,6 +172,7 @@ export default function DashboardHeader({
           {/* Try Demo Mode Trigger Button */}
           <button
             type="button"
+            data-testid="try-demo-button"
             onClick={() => {
               setDemoTicketId(undefined);
               setIsDemoModalOpen(true);

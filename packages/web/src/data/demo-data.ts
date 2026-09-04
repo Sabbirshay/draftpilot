@@ -206,6 +206,14 @@ export const DEMO_STATS = {
   macrosActive: 12,
 };
 
+export function resolveDemoTicket(idOrCategory?: string): DemoTicket {
+  if (!idOrCategory) return DEMO_TICKETS[0];
+  const found = DEMO_TICKETS.find(
+    (t) => t.id === idOrCategory || t.category === idOrCategory
+  );
+  return found || DEMO_TICKETS[0];
+}
+
 export function synthesizeDemoDraft(
   ticket: DemoTicket,
   tone: string,
@@ -216,7 +224,7 @@ export function synthesizeDemoDraft(
   const redactedThread = scrubPII(fullThread);
 
   // Count scrubbed tokens
-  const redactions = redactedThread.match(/\[(CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\]/g);
+  const redactions = redactedThread.match(/\[(CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS|CUSTOM)_REDACTED\]/g);
   const scrubbedCount = redactions ? redactions.length : 0;
 
   // Normalize tone

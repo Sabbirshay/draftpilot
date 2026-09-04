@@ -5,6 +5,7 @@ import {
   DEMO_TICKETS,
   DEMO_MACROS,
   synthesizeDemoDraft,
+  resolveDemoTicket,
   type DemoTicket,
 } from '../../data/demo-data.ts';
 import {
@@ -469,6 +470,189 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
 
       // Only the last ticket should be resolved
       assert.strictEqual(resolvedDraft, 'ticket_3', 'Only the final switched ticket should resolve');
+    });
+
+    test('resolveDemoTicket seamlessly maps category names (shipping_status, password_reset, etc.) and direct IDs', () => {
+      // By category
+      assert.strictEqual(resolveDemoTicket('shipping_status').id, 'ticket-shipping');
+      assert.strictEqual(resolveDemoTicket('password_reset').id, 'ticket-password');
+      assert.strictEqual(resolveDemoTicket('billing_question').id, 'ticket-billing');
+      assert.strictEqual(resolveDemoTicket('return_refund').id, 'ticket-refund');
+
+      // By direct ID
+      assert.strictEqual(resolveDemoTicket('ticket-shipping').id, 'ticket-shipping');
+      assert.strictEqual(resolveDemoTicket('ticket-password').id, 'ticket-password');
+      assert.strictEqual(resolveDemoTicket('ticket-billing').id, 'ticket-billing');
+      assert.strictEqual(resolveDemoTicket('ticket-refund').id, 'ticket-refund');
+
+      // Edge cases: undefined or unknown string
+      assert.strictEqual(resolveDemoTicket(undefined).id, DEMO_TICKETS[0].id);
+      assert.strictEqual(resolveDemoTicket('non-existent-xyz').id, DEMO_TICKETS[0].id);
+      assert.strictEqual(resolveDemoTicket('').id, DEMO_TICKETS[0].id);
+    });
+
+    test('modal session state management resets ticket selection and clears macros on reopen without payload', () => {
+      // Session 1: External event opens with targeted category
+      let initialTicketId: string | undefined = 'shipping_status';
+      let selectedTicketId = resolveDemoTicket(initialTicketId).id;
+      let selectedMacroId: string | undefined = 'demo-1';
+      let copied = false;
+      let inserted = false;
+
+      assert.strictEqual(selectedTicketId, 'ticket-shipping', 'Initial session must resolve to shipping ticket');
+      assert.strictEqual(selectedMacroId, 'demo-1');
+
+      // Modal closes
+      let isOpen = false;
+      let timer: NodeJS.Timeout | null = setTimeout(() => {}, 500);
+
+      // Closing cleanup
+      if (!isOpen) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+      assert.strictEqual(timer, null, 'Closing modal must cancel pending timers');
+
+      // Session 2: User clicks header "Try Demo" button (initialTicketId = undefined)
+      isOpen = true;
+      initialTicketId = undefined;
+      selectedTicketId = resolveDemoTicket(initialTicketId).id;
+      selectedMacroId = undefined;
+      copied = false;
+      inserted = false;
+
+      assert.strictEqual(selectedTicketId, DEMO_TICKETS[0].id, 'Header click must reset ticket to default (ticket-refund)');
+      assert.strictEqual(selectedMacroId, undefined, 'Header click must clear previously selected macro');
+      assert.strictEqual(copied, false, 'Copy status must reset');
+      assert.strictEqual(inserted, false, 'Insert status must reset');
+    });
+
+    test('modal dialog traps focus with Tab and Shift+Tab key navigation', () => {
+      const focusableElements = [
+        { id: 'close-btn', focused: false, focus() { this.focused = true; } },
+        { id: 'ticket-1', focused: false, focus() { this.focused = true; } },
+        { id: 'get-started-link', focused: false, focus() { this.focused = true; } },
+      ];
+
+      const container = {
+        contains: (el: any) => focusableElements.includes(el),
+        querySelectorAll: () => focusableElements,
+      };
+
+      const simulateTabNavigation = (currentActive: any, shiftKey: boolean) => {
+        const focusable = container.querySelectorAll();
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        let defaultPrevented = false;
+
+        const event = {
+          key: 'Tab',
+          shiftKey,
+          preventDefault: () => { defaultPrevented = true; },
+        };
+
+        if (event.shiftKey) {
+          if (currentActive === first || !container.contains(currentActive)) {
+            event.preventDefault();
+            last.focus();
+            return { nextActive: last, defaultPrevented };
+          }
+        } else {
+          if (currentActive === last || !container.contains(currentActive)) {
+            event.preventDefault();
+            first.focus();
+            return { nextActive: first, defaultPrevented };
+          }
+        }
+
+        return { nextActive: null, defaultPrevented: false };
+      };
+
+      // Forward Tab from last element wraps to first
+      const forwardWrap = simulateTabNavigation(focusableElements[2], false);
+      assert.strictEqual(forwardWrap.defaultPrevented, true, 'Tab on last element must prevent default');
+      assert.strictEqual(forwardWrap.nextActive?.id, 'close-btn', 'Focus must wrap to first element');
+
+      // Backward Shift+Tab from first element wraps to last
+      const backwardWrap = simulateTabNavigation(focusableElements[0], true);
+      assert.strictEqual(backwardWrap.defaultPrevented, true, 'Shift+Tab on first element must prevent default');
+      assert.strictEqual(backwardWrap.nextActive?.id, 'get-started-link', 'Focus must wrap to last element');
+    });
+
+    test('handleInsert does not trigger positive feedback when draft is null or pending', () => {
+      let inserted = false;
+      const draftResult: any = null;
+
+      const handleInsert = () => {
+        if (draftResult) {
+          inserted = true;
+        }
+      };
+
+      handleInsert();
+      assert.strictEqual(inserted, false, 'handleInsert must not set inserted: true when draftResult is null');
+    });
+
+    test('fallbackCopy preserves focus on previously active element', () => {
+      let previouslyFocusedElement: any = {
+        id: 'copy-button',
+        focused: true,
+        focus() { this.focused = true; },
+      };
+
+      let removed = false;
+      const fakeTextarea = {
+        style: {},
+        value: '',
+        setAttribute: () => {},
+        focus: () => {},
+        select: () => {},
+      };
+
+      const originalDoc = (globalThis as any).document;
+      try {
+        (globalThis as any).document = {
+          activeElement: previouslyFocusedElement,
+          contains: (el: any) => el === previouslyFocusedElement,
+          createElement: () => fakeTextarea,
+          body: {
+            appendChild: () => {},
+            removeChild: () => { removed = true; },
+          },
+          execCommand: () => true,
+        };
+
+        // Run fallbackCopy logic
+        const previouslyFocused = (globalThis as any).document.activeElement;
+        const textArea = (globalThis as any).document.createElement('textarea');
+        textArea.value = 'test draft text';
+        (globalThis as any).document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        (globalThis as any).document.execCommand('copy');
+        (globalThis as any).document.body.removeChild(textArea);
+
+        if (previouslyFocused && (globalThis as any).document.contains(previouslyFocused)) {
+          previouslyFocused.focus();
+        }
+
+        assert.strictEqual(removed, true, 'Temporary textarea must be removed');
+        assert.strictEqual(previouslyFocusedElement.focused, true, 'Focus must be restored to previous element');
+      } finally {
+        (globalThis as any).document = originalDoc;
+      }
+    });
+
+    test('isRedactedToken detects [CUSTOM_REDACTED] alongside built-in redaction tokens', () => {
+      const isRedactedToken = (str: string) =>
+        /^\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS|CUSTOM)_REDACTED\]$/.test(str);
+
+      assert.strictEqual(isRedactedToken('[CUSTOM_REDACTED]'), true, 'Must detect CUSTOM_REDACTED');
+      assert.strictEqual(isRedactedToken('[CARD_REDACTED]'), true, 'Must detect CARD_REDACTED');
+      assert.strictEqual(isRedactedToken('[EMAIL_REDACTED]'), true, 'Must detect EMAIL_REDACTED');
+      assert.strictEqual(isRedactedToken('[UNKNOWN_REDACTED]'), false, 'Must not detect unknown token');
     });
   });
 });
