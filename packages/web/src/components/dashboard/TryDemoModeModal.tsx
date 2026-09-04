@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   DEMO_TICKETS,
@@ -21,9 +21,12 @@ export default function TryDemoModeModal({
   onClose,
   initialTicketId,
 }: TryDemoModeModalProps) {
-  const [selectedTicketId, setSelectedTicketId] = useState<string>(
-    initialTicketId || DEMO_TICKETS[0].id
-  );
+  const [selectedTicketId, setSelectedTicketId] = useState<string>(() => {
+    if (initialTicketId && DEMO_TICKETS.some((t) => t.id === initialTicketId)) {
+      return initialTicketId;
+    }
+    return DEMO_TICKETS[0].id;
+  });
   const [selectedTone, setSelectedTone] = useState<'empathetic' | 'concise' | 'formal' | 'urgent'>('empathetic');
   const [selectedMacroId, setSelectedMacroId] = useState<string | undefined>(undefined);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -31,31 +34,64 @@ export default function TryDemoModeModal({
   const [copied, setCopied] = useState<boolean>(false);
   const [inserted, setInserted] = useState<boolean>(false);
 
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const copiedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const insertedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+
   const currentTicket = DEMO_TICKETS.find((t) => t.id === selectedTicketId) || DEMO_TICKETS[0];
 
-  // Sync initialTicketId if provided prop changes
+  // Sync initialTicketId if provided prop changes and is valid
   useEffect(() => {
     if (isOpen && initialTicketId) {
-      setSelectedTicketId(initialTicketId);
+      const valid = DEMO_TICKETS.some((t) => t.id === initialTicketId);
+      if (valid) {
+        setSelectedTicketId(initialTicketId);
+      }
     }
   }, [isOpen, initialTicketId]);
 
-  // Lock body scroll when modal is open and restore cleanly on close
+  // Clean up all timers on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      if (insertedTimeoutRef.current) clearTimeout(insertedTimeoutRef.current);
+    };
+  }, []);
+
+  // Lock body scroll and manage accessible focus
   useEffect(() => {
     if (!isOpen) return;
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      previousActiveElementRef.current = document.activeElement;
+    }
+
+    const focusTimer = setTimeout(() => {
+      modalContainerRef.current?.focus();
+    }, 50);
+
     return () => {
       document.body.style.overflow = originalOverflow;
+      clearTimeout(focusTimer);
+      if (previousActiveElementRef.current) {
+        previousActiveElementRef.current.focus?.();
+        previousActiveElementRef.current = null;
+      }
     };
   }, [isOpen]);
 
-  // Helper to trigger generation
+  // Helper to trigger generation with race condition prevention
   const handleGenerate = (ticket: DemoTicket, tone: string, macroId?: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setIsGenerating(true);
     setInserted(false);
 
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       const result = synthesizeDemoDraft(ticket, tone, macroId);
       setDraftResult(result);
       setIsGenerating(false);
@@ -79,30 +115,58 @@ export default function TryDemoModeModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  const fallbackCopy = (text: string) => {
+    if (typeof document === 'undefined') return;
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-9999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    } catch {
+      // Ignore fallback copy errors
+    }
+  };
+
   const handleCopy = () => {
     if (draftResult) {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(draftResult.draft).catch(() => {});
+        navigator.clipboard.writeText(draftResult.draft).catch(() => {
+          fallbackCopy(draftResult.draft);
+        });
+      } else {
+        fallbackCopy(draftResult.draft);
       }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
     }
   };
 
   const handleInsert = () => {
+    if (draftResult) {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(draftResult.draft).catch(() => {});
+      }
+    }
     setInserted(true);
-    setTimeout(() => setInserted(false), 3000);
+    if (insertedTimeoutRef.current) clearTimeout(insertedTimeoutRef.current);
+    insertedTimeoutRef.current = setTimeout(() => setInserted(false), 3000);
   };
 
-  if (!isOpen) return null;
+  // Highlight PII tokens in redacted text without stateful regex issues
+  const isRedactedToken = (str: string) =>
+    /^\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\]$/.test(str);
 
-  // Highlight PII tokens in redacted text
   const renderHighlightedRedaction = (text: string) => {
-    const tokenRegex = /(\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\])/g;
-    const parts = text.split(tokenRegex);
+    const parts = text.split(/(\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\])/g);
 
     return parts.map((part, idx) => {
-      if (tokenRegex.test(part)) {
+      if (isRedactedToken(part)) {
         return (
           <span
             key={idx}
@@ -118,84 +182,96 @@ export default function TryDemoModeModal({
 
   return (
     <AnimatePresence>
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto"
-        onClick={onClose}
-        data-testid="demo-modal-backdrop"
-      >
+      {isOpen && (
         <motion.div
-          onClick={(e) => e.stopPropagation()}
-          initial={{ opacity: 0, scale: 0.95, y: 15 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 15 }}
+          key="demo-modal-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="relative w-full max-w-5xl rounded-3xl border border-border/80 bg-bg-card/95 shadow-2xl backdrop-blur-2xl flex flex-col max-h-[92vh] overflow-hidden"
-          role="dialog"
-          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto"
+          onClick={onClose}
+          data-testid="demo-modal-backdrop"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border/80 bg-elevated/40 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center text-accent text-lg font-bold">
-                ✨
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-text">Interactive Demo Mode</h2>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
-                    Zero Auth Required
-                  </span>
+          <motion.div
+            ref={modalContainerRef}
+            tabIndex={-1}
+            key="demo-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+            transition={{ duration: 0.2 }}
+            className="relative w-full max-w-5xl rounded-3xl border border-border/80 bg-bg-card/95 shadow-2xl backdrop-blur-2xl flex flex-col max-h-[92vh] overflow-hidden focus:outline-none"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="demo-modal-title"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-border/80 bg-elevated/40 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center text-accent text-base sm:text-lg font-bold">
+                  ✨
                 </div>
-                <p className="text-xs text-text-muted">
-                  Test AI reply synthesis, real-time tone modulation, and client-side PII scrubbing on sample threads.
-                </p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 id="demo-modal-title" className="text-sm sm:text-base font-bold text-text">
+                      Interactive Demo Mode
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
+                      Zero Auth Required
+                    </span>
+                  </div>
+                  <p className="text-[11px] sm:text-xs text-text-muted">
+                    Test AI reply synthesis, real-time tone modulation, and client-side PII scrubbing on sample threads.
+                  </p>
+                </div>
               </div>
+
+              <button
+                onClick={onClose}
+                className="w-8 h-8 rounded-full bg-elevated hover:bg-border text-text-muted hover:text-text flex items-center justify-center transition-colors cursor-pointer shrink-0 ml-2"
+                aria-label="Close demo modal"
+              >
+                ✕
+              </button>
             </div>
 
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full bg-elevated hover:bg-border text-text-muted hover:text-text flex items-center justify-center transition-colors cursor-pointer"
-              aria-label="Close demo modal"
-            >
-              ✕
-            </button>
-          </div>
+            {/* Ticket Selector Bar */}
+            <div className="px-4 sm:px-6 py-2.5 sm:py-3 border-b border-border/60 bg-bg/50 flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
+              <span className="text-xs font-semibold text-text-dim uppercase tracking-wider mr-1">
+                Sample Tickets:
+              </span>
+              {DEMO_TICKETS.map((ticket) => {
+                const isSelected = ticket.id === selectedTicketId;
+                const icons: Record<string, string> = {
+                  return_refund: '🛍️ Return / Refund',
+                  shipping_status: '📦 Shipping Status',
+                  password_reset: '🔐 Password Reset',
+                  billing_question: '💳 Billing Question',
+                };
 
-          {/* Ticket Selector Bar */}
-          <div className="px-6 py-3 border-b border-border/60 bg-bg/50 flex flex-wrap items-center gap-2 shrink-0">
-            <span className="text-xs font-semibold text-text-dim uppercase tracking-wider mr-1">
-              Sample Tickets:
-            </span>
-            {DEMO_TICKETS.map((ticket) => {
-              const isSelected = ticket.id === selectedTicketId;
-              const icons: Record<string, string> = {
-                return_refund: '🛍️ Return / Refund',
-                shipping_status: '📦 Shipping Status',
-                password_reset: '🔐 Password Reset',
-                billing_question: '💳 Billing Question',
-              };
+                return (
+                  <button
+                    key={ticket.id}
+                    onClick={() => {
+                      setSelectedTicketId(ticket.id);
+                      setSelectedMacroId(undefined);
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.4)]'
+                        : 'bg-elevated/70 text-text-muted hover:text-text hover:bg-elevated border border-border/60'
+                    }`}
+                  >
+                    <span>{icons[ticket.category] || ticket.subject}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-              return (
-                <button
-                  key={ticket.id}
-                  onClick={() => {
-                    setSelectedTicketId(ticket.id);
-                    setSelectedMacroId(undefined);
-                  }}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
-                    isSelected
-                      ? 'bg-accent text-white shadow-[0_0_15px_rgba(124,58,237,0.4)]'
-                      : 'bg-elevated/70 text-text-muted hover:text-text hover:bg-elevated border border-border/60'
-                  }`}
-                >
-                  <span>{icons[ticket.category] || ticket.subject}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Main Dual-Pane Body */}
-          <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto">
+            {/* Main Dual-Pane Body */}
+            <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 overflow-y-auto">
             {/* Left Pane: Customer Thread & PII Scrubbing Details (6 cols) */}
             <div className="lg:col-span-6 space-y-5">
               {/* Customer Email Card */}
@@ -386,7 +462,7 @@ export default function TryDemoModeModal({
               </div>
 
               {/* Draft Content Box */}
-              <div className="flex-1 min-h-[280px] rounded-2xl bg-bg/90 border border-border/80 p-5 shadow-inner flex flex-col justify-between">
+              <div className="flex-1 min-h-[280px] rounded-2xl bg-bg/90 border border-border/80 p-4 sm:p-5 shadow-inner flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between text-[11px] text-text-dim pb-2.5 mb-3 border-b border-border/50">
                     <span>
@@ -408,8 +484,8 @@ export default function TryDemoModeModal({
                 </div>
 
                 {/* Bottom Actions */}
-                <div className="pt-4 mt-4 border-t border-border/50 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                <div className="pt-3 sm:pt-4 mt-3 sm:mt-4 border-t border-border/50 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={handleCopy}
                       className="px-3.5 py-1.5 rounded-xl bg-elevated hover:bg-border border border-border text-xs font-semibold text-text transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -457,28 +533,29 @@ export default function TryDemoModeModal({
             </div>
           </div>
 
-          {/* Footer CTA */}
-          <div className="px-6 py-3.5 border-t border-border/80 bg-elevated/30 flex items-center justify-between text-xs shrink-0">
+          {/* Footer CTA with Responsive Stacking for narrow mobile viewports */}
+          <div className="px-4 sm:px-6 py-3 sm:py-3.5 border-t border-border/80 bg-elevated/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
             <p className="text-text-muted">
               Ready to use DraftPilot with your live Gmail inbox?
             </p>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end gap-2.5 sm:gap-3 w-full sm:w-auto">
               <button
                 onClick={onClose}
-                className="px-4 py-1.5 rounded-xl bg-bg border border-border hover:border-border-hover text-text font-medium cursor-pointer"
+                className="flex-1 sm:flex-none text-center px-4 py-1.5 rounded-xl bg-bg border border-border hover:border-border-hover text-text font-medium cursor-pointer"
               >
                 Close Demo
               </button>
               <a
                 href="/join"
-                className="px-4 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)]"
+                className="flex-1 sm:flex-none text-center px-4 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)]"
               >
                 Get Started Free →
               </a>
             </div>
           </div>
         </motion.div>
-      </div>
-    </AnimatePresence>
+      </motion.div>
+    )}
+  </AnimatePresence>
   );
 }

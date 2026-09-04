@@ -259,33 +259,45 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
   });
 
   describe('R1 & R2: Dashboard Header Demo Wiring & Sandbox Integration', () => {
-    test('draftpilot:open-demo event triggers listener and passes ticketId payload', () => {
+    test('draftpilot:open-demo event triggers listener and passes ticketId payload or resets', () => {
       let isOpen = false;
       let targetTicketId: string | undefined = undefined;
+      let callbackInvoked = false;
 
-      const handleOpenDemo = (event?: any) => {
-        if (event?.detail?.ticketId) {
-          targetTicketId = event.detail.ticketId;
-        }
-        isOpen = true;
+      const onTryDemoClick = () => {
+        callbackInvoked = true;
       };
 
-      // Register listener
+      const handleOpenDemo = (event?: Event) => {
+        const customEvent = event as CustomEvent<{ ticketId?: string }> | undefined;
+        if (customEvent?.detail?.ticketId) {
+          targetTicketId = customEvent.detail.ticketId;
+        } else {
+          targetTicketId = undefined;
+        }
+        isOpen = true;
+        onTryDemoClick();
+      };
+
+      // Register listener on global window or EventTarget
       const eventTarget = new EventTarget();
       eventTarget.addEventListener('draftpilot:open-demo', handleOpenDemo as EventListener);
 
-      // Trigger standard open event
-      eventTarget.dispatchEvent(new CustomEvent('draftpilot:open-demo'));
-      assert.strictEqual(isOpen, true, 'Event dispatch must open demo modal');
-      assert.strictEqual(targetTicketId, undefined);
-
       // Trigger targeted ticket open event
-      isOpen = false;
       eventTarget.dispatchEvent(
         new CustomEvent('draftpilot:open-demo', { detail: { ticketId: 'shipping_status' } })
       );
       assert.strictEqual(isOpen, true, 'Event dispatch with detail must open demo modal');
       assert.strictEqual(targetTicketId, 'shipping_status', 'Must capture ticketId payload');
+      assert.strictEqual(callbackInvoked, true, 'Must invoke onTryDemoClick callback');
+
+      // Trigger standard open event (without detail) - must reset ticketId to undefined
+      isOpen = false;
+      callbackInvoked = false;
+      eventTarget.dispatchEvent(new CustomEvent('draftpilot:open-demo'));
+      assert.strictEqual(isOpen, true, 'Event dispatch must open demo modal');
+      assert.strictEqual(targetTicketId, undefined, 'Ticket ID must reset to undefined when omitted');
+      assert.strictEqual(callbackInvoked, true, 'Must invoke onTryDemoClick callback');
     });
 
     test('selecting between demo tickets updates inquiry context and redacts sensitive PII across all 4 categories', () => {
@@ -334,7 +346,14 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
       }
     });
 
-    test('body scroll lock locks overflow to hidden when open and restores on unmount', () => {
+    test('body scroll lock and focus restoration restores background focus and original overflow cleanly', () => {
+      let focused = false;
+      const fakeTriggerButton = {
+        focus: () => {
+          focused = true;
+        },
+      };
+
       const fakeBody = {
         style: {
           overflow: 'auto',
@@ -343,22 +362,29 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
 
       const originalDoc = (globalThis as any).document;
       try {
-        (globalThis as any).document = { body: fakeBody };
+        (globalThis as any).document = {
+          body: fakeBody,
+          activeElement: fakeTriggerButton,
+        };
 
         // Simulate modal mount (isOpen = true)
-        const initialOverflow = fakeBody.style.overflow;
+        const originalOverflow = fakeBody.style.overflow;
+        const previousActiveElement = (globalThis as any).document.activeElement;
         fakeBody.style.overflow = 'hidden';
         assert.strictEqual(fakeBody.style.overflow, 'hidden', 'Body overflow must be hidden while modal is open');
 
         // Simulate modal unmount / close cleanup
-        fakeBody.style.overflow = initialOverflow;
+        fakeBody.style.overflow = originalOverflow;
+        previousActiveElement?.focus();
+
         assert.strictEqual(fakeBody.style.overflow, 'auto', 'Body overflow must be restored to previous state on close');
+        assert.strictEqual(focused, true, 'Trigger element must be refocused when modal closes');
       } finally {
         (globalThis as any).document = originalDoc;
       }
     });
 
-    test('copy and insert actions trigger positive visual confirmations without throwing', async () => {
+    test('copy and insert actions trigger positive visual confirmations and support clipboard fallbacks', async () => {
       let copiedText = '';
       const mockClipboard = {
         writeText: async (text: string) => {
@@ -391,6 +417,58 @@ describe('Milestone 1: Activation & Pairing (R1: Demo Mode & R2: Extension Hands
           // ignore cleanup errors if unconfigurable
         }
       }
+    });
+
+    test('redaction token detection regex is non-stateful and handles adjacent tokens reliably', () => {
+      const isRedactedToken = (str: string) =>
+        /^\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\]$/.test(str);
+
+      const adjacentSample = '[CARD_REDACTED][EMAIL_REDACTED][TOKEN_REDACTED]';
+      const parts = adjacentSample.split(/(\[(?:CARD|EMAIL|TOKEN|SECRET|SSN|IP|PHONE|ADDRESS)_REDACTED\])/g);
+
+      const matchedTokens: string[] = [];
+      for (const part of parts) {
+        if (isRedactedToken(part)) {
+          matchedTokens.push(part);
+        }
+      }
+
+      assert.strictEqual(matchedTokens.length, 3, 'Must match all 3 adjacent tokens');
+      assert.strictEqual(matchedTokens[0], '[CARD_REDACTED]');
+      assert.strictEqual(matchedTokens[1], '[EMAIL_REDACTED]');
+      assert.strictEqual(matchedTokens[2], '[TOKEN_REDACTED]');
+    });
+
+    test('invalid or unknown initialTicketId safely falls back to default ticket', () => {
+      const initialTicketId = 'unknown_invalid_ticket_xyz';
+      const valid = DEMO_TICKETS.some((t) => t.id === initialTicketId);
+      assert.strictEqual(valid, false);
+
+      const resolvedTicket = DEMO_TICKETS.find((t) => t.id === initialTicketId) || DEMO_TICKETS[0];
+      assert.strictEqual(resolvedTicket.id, DEMO_TICKETS[0].id, 'Must fall back to return_refund ticket');
+    });
+
+    test('rapidly switching draft parameters debounces and cancels earlier pending syntheses', async () => {
+      let activeTimer: NodeJS.Timeout | null = null;
+      let resolvedDraft = '';
+
+      const simulateGenerate = (ticketId: string, delayMs = 15) => {
+        if (activeTimer) clearTimeout(activeTimer);
+        activeTimer = setTimeout(() => {
+          resolvedDraft = ticketId;
+        }, delayMs);
+      };
+
+      // Fire 3 rapid switches
+      simulateGenerate('ticket_1', 15);
+      simulateGenerate('ticket_2', 15);
+      simulateGenerate('ticket_3', 15);
+
+      // Wait for the final timer to resolve
+      await new Promise((r) => setTimeout(r, 40));
+
+      // Only the last ticket should be resolved
+      assert.strictEqual(resolvedDraft, 'ticket_3', 'Only the final switched ticket should resolve');
     });
   });
 });

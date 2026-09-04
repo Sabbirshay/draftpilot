@@ -56,14 +56,17 @@ export default function DashboardHeader({
       const customEvent = event as CustomEvent<{ ticketId?: string }> | undefined;
       if (customEvent?.detail?.ticketId) {
         setDemoTicketId(customEvent.detail.ticketId);
+      } else {
+        setDemoTicketId(undefined);
       }
       setIsDemoModalOpen(true);
+      onTryDemoClick?.();
     };
     window.addEventListener('draftpilot:open-demo', handleOpenDemo);
     return () => {
       window.removeEventListener('draftpilot:open-demo', handleOpenDemo);
     };
-  }, []);
+  }, [onTryDemoClick]);
 
   // Close profile dropdown on click outside
   useEffect(() => {
@@ -165,15 +168,17 @@ export default function DashboardHeader({
           <button
             type="button"
             onClick={() => {
+              setDemoTicketId(undefined);
               setIsDemoModalOpen(true);
               if (onTryDemoClick) {
                 onTryDemoClick();
               }
             }}
+            aria-label="Try Demo Mode"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-accent/20 to-cyan/20 hover:from-accent/30 hover:to-cyan/30 border border-accent/40 text-text text-xs font-semibold transition-all shadow-[0_0_12px_rgba(124,58,237,0.25)] cursor-pointer"
             title="Try interactive demo mode on sample tickets"
           >
-            <span className="text-accent-light">✨</span>
+            <span className="text-accent-light" aria-hidden="true">✨</span>
             <span className="hidden md:inline">Try Demo</span>
           </button>
 
@@ -310,7 +315,10 @@ export default function DashboardHeader({
       {/* Interactive Try Demo Mode Modal */}
       <TryDemoModeModal
         isOpen={isDemoModalOpen}
-        onClose={() => setIsDemoModalOpen(false)}
+        onClose={() => {
+          setIsDemoModalOpen(false);
+          setDemoTicketId(undefined);
+        }}
         initialTicketId={demoTicketId}
       />
     </div>
