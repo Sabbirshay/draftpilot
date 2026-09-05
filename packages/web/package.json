@@ -6,12 +6,13 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test --test-concurrency=1 src/lib/__tests__/*.test.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 src/lib/__tests__/*.test.ts src/__tests__/*.test.ts",
     "lint": "echo 'Web package lint verified'"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0",
     "@vercel/analytics": "^2.0.1",
+    "botid": "^1.4.5",
     "framer-motion": "^11.0.0",
     "motion": "^13.1.1",
     "next": "^14.0.0",
