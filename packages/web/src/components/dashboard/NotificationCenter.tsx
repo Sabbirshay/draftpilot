@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardTab } from './DashboardHeader';
+import { useAuth } from '@/components/providers/AuthProvider';
+
+export type NotificationType = 'welcome' | 'milestone' | 'team' | 'system' | 'kb' | 'billing';
 
 export interface NotificationItem {
   id: string;
-  type: 'team' | 'kb' | 'billing' | 'founder' | 'system';
+  type: NotificationType;
   title: string;
   message: string;
   timestamp: string;
@@ -16,63 +19,176 @@ export interface NotificationItem {
   badge?: string;
 }
 
-const INITIAL_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: 'notif-1',
-    type: 'founder',
-    title: 'Personal Welcome from DraftPilot Founder',
-    message: 'Welcome to DraftPilot! I added 500 bonus AI draft tokens to your workspace. Feel free to ping me directly if you need custom system prompt tuning.',
-    timestamp: '15m ago',
-    unread: true,
-    actionTab: 'overview',
-    actionLabel: 'View Workspace Overview',
-    badge: 'Founder Message 👑',
-  },
-  {
-    id: 'notif-2',
-    type: 'kb',
-    title: 'Knowledge Base Vector Indexing Complete',
-    message: 'File "Customer_Support_Policy_&_Refunds_2026.pdf" was fully parsed. 84 vector chunks are now active in your Gmail AI drafting assistant.',
-    timestamp: '42m ago',
-    unread: true,
-    actionTab: 'macros',
-    actionLabel: 'View 50 Auto Macros',
-    badge: 'KB Ingestion 🧠',
-  },
-  {
-    id: 'notif-3',
-    type: 'team',
-    title: 'New Team Member Onboarded',
-    message: 'Sarah Jenkins (sarah@company.com) joined your support team and paired her Chrome Extension with your workspace secret key.',
-    timestamp: '2h ago',
-    unread: true,
-    actionTab: 'team',
-    actionLabel: 'Manage Team Seats',
-    badge: 'Team Seat 👥',
-  },
-  {
-    id: 'notif-4',
-    type: 'billing',
-    title: 'Upcoming Subscription Renewal Notice',
-    message: 'Your monthly Team Plan ($76.00 / 4 active seats) is scheduled for renewal on September 01, 2026. Auto-pay is active.',
-    timestamp: '5h ago',
-    unread: false,
-    actionTab: 'billing',
-    actionLabel: 'View Billing Portal',
-    badge: 'Billing Alert 💳',
-  },
-  {
-    id: 'notif-5',
-    type: 'system',
-    title: 'Feature Release: Gmail Inline Autocomplete',
-    message: 'Ghost text tab-to-complete suggestions are now enabled for all 4 agents in your workspace compose window.',
-    timestamp: 'Yesterday',
-    unread: false,
-    actionTab: 'gmail',
-    actionLabel: 'Check Gmail Sync',
-    badge: 'System Update ⚡',
-  },
-];
+export interface MilestoneFlags {
+  extensionInstalled?: boolean;
+  firstMacroAdded?: boolean;
+  firstDraftGenerated?: boolean;
+  teamMemberInvited?: boolean;
+}
+
+export type NotificationFilter = 'all' | 'unread' | 'milestones' | 'system';
+
+export const STORAGE_KEY_READ = 'draftpilot_read_notifications';
+export const STORAGE_KEY_DISMISSED = 'draftpilot_dismissed_notifications';
+
+export const EMPTY_STATE_TEXT = "No new notifications. You're all caught up! ✨";
+
+export const WELCOME_NOTIFICATION: NotificationItem = {
+  id: 'notif-welcome',
+  type: 'welcome',
+  title: 'Welcome to DraftPilot!',
+  message: 'Your AI drafting workspace is ready. Install the extension, create your first macro, and start drafting responses in seconds.',
+  timestamp: 'Just now',
+  unread: true,
+  actionTab: 'overview',
+  actionLabel: 'Explore Workspace',
+  badge: 'Getting Started 🚀',
+};
+
+export function getMilestoneNotifications(milestones: MilestoneFlags): NotificationItem[] {
+  const items: NotificationItem[] = [];
+
+  if (milestones.extensionInstalled) {
+    items.push({
+      id: 'notif-milestone-extension',
+      type: 'milestone',
+      title: 'Extension Pioneer Unlocked',
+      message: 'DraftPilot Chrome Extension is paired and ready for inline Gmail drafting.',
+      timestamp: 'Active',
+      unread: true,
+      actionTab: 'gmail',
+      actionLabel: 'Check Gmail Sync',
+      badge: 'Extension Pioneer 🧩',
+    });
+  }
+
+  if (milestones.firstMacroAdded) {
+    items.push({
+      id: 'notif-milestone-macro',
+      type: 'milestone',
+      title: 'Macro Architect Unlocked',
+      message: 'Your custom support macro was saved. You can now trigger canned templates in 1 click.',
+      timestamp: 'Active',
+      unread: true,
+      actionTab: 'macros',
+      actionLabel: 'View Macros',
+      badge: 'Macro Architect 📐',
+    });
+  }
+
+  if (milestones.firstDraftGenerated) {
+    items.push({
+      id: 'notif-milestone-draft',
+      type: 'milestone',
+      title: 'AI Copilot Ace Unlocked',
+      message: 'First AI reply generated! Context-aware reply synthesized with PII privacy scrubbing.',
+      timestamp: 'Active',
+      unread: true,
+      actionTab: 'overview',
+      actionLabel: 'View Activity',
+      badge: 'AI Copilot Ace ⚡',
+    });
+  }
+
+  if (milestones.teamMemberInvited) {
+    items.push({
+      id: 'notif-milestone-team',
+      type: 'team',
+      title: 'Team Builder Unlocked',
+      message: 'New teammate invited to collaborate in your shared AI drafting workspace.',
+      timestamp: 'Active',
+      unread: true,
+      actionTab: 'team',
+      actionLabel: 'Manage Team',
+      badge: 'Team Builder 👥',
+    });
+  }
+
+  return items;
+}
+
+export function buildNotificationList(
+  milestones: MilestoneFlags,
+  readIds: string[],
+  dismissedIds: string[]
+): NotificationItem[] {
+  const candidates: NotificationItem[] = [
+    WELCOME_NOTIFICATION,
+    ...getMilestoneNotifications(milestones),
+  ];
+
+  return candidates
+    .filter((notif) => !dismissedIds.includes(notif.id))
+    .map((notif) => ({
+      ...notif,
+      unread: !readIds.includes(notif.id),
+    }));
+}
+
+export function getStoredIds(key: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredIds(key: string, ids: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Ignore in storage-restricted environments
+  }
+}
+
+export function readCurrentMilestones(onboardingState?: any): MilestoneFlags {
+  let extensionInstalled = Boolean(onboardingState?.extension_installed);
+  let firstMacroAdded = Boolean(onboardingState?.first_macro_added);
+  let firstDraftGenerated = Boolean(onboardingState?.first_draft_generated);
+  let teamMemberInvited = Boolean(onboardingState?.team_member_invited);
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (
+        document.documentElement.getAttribute('data-draftpilot-extension-installed') === 'true' ||
+        localStorage.getItem('draftpilot_extension_installed') === 'true'
+      ) {
+        extensionInstalled = true;
+      }
+      if (localStorage.getItem('draftpilot_first_macro_added') === 'true') {
+        firstMacroAdded = true;
+      }
+      if (localStorage.getItem('draftpilot_first_draft_generated') === 'true') {
+        firstDraftGenerated = true;
+      }
+      if (localStorage.getItem('draftpilot_team_member_invited') === 'true') {
+        teamMemberInvited = true;
+      }
+    } catch {
+      // Ignore localStorage read errors
+    }
+  }
+
+  return {
+    extensionInstalled,
+    firstMacroAdded,
+    firstDraftGenerated,
+    teamMemberInvited,
+  };
+}
+
+function useSafeAuth() {
+  try {
+    return useAuth();
+  } catch {
+    return null;
+  }
+}
 
 interface NotificationCenterProps {
   onNavigateTab: (tab: DashboardTab) => void;
@@ -80,13 +196,58 @@ interface NotificationCenterProps {
 
 export default function NotificationCenter({ onNavigateTab }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
-  const [filter, setFilter] = useState<'all' | 'unread' | 'founder' | 'billing'>('all');
+  const [filter, setFilter] = useState<NotificationFilter>('all');
+  const [readIds, setReadIds] = useState<string[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
+  const [milestones, setMilestones] = useState<MilestoneFlags>({
+    extensionInstalled: false,
+    firstMacroAdded: false,
+    firstDraftGenerated: false,
+    teamMemberInvited: false,
+  });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter((n) => n.unread).length;
+  const auth = useSafeAuth();
+  const onboardingState = auth?.onboardingState;
 
-  // Close when clicking outside
+  // Hydrate stored IDs and milestones on mount and when onboardingState updates
+  const refreshState = useCallback(() => {
+    setReadIds(getStoredIds(STORAGE_KEY_READ));
+    setDismissedIds(getStoredIds(STORAGE_KEY_DISMISSED));
+    setMilestones(readCurrentMilestones(onboardingState));
+  }, [onboardingState]);
+
+  useEffect(() => {
+    refreshState();
+  }, [refreshState]);
+
+  // Listen for window focus, storage events, and extension detection events
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleUpdate = () => {
+      refreshState();
+    };
+
+    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('focus', handleUpdate);
+    window.addEventListener('draftpilot-extension-detected', handleUpdate);
+
+    return () => {
+      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
+      window.removeEventListener('draftpilot-extension-detected', handleUpdate);
+    };
+  }, [refreshState]);
+
+  // Re-check milestones when tray opens
+  useEffect(() => {
+    if (isOpen) {
+      refreshState();
+    }
+  }, [isOpen, refreshState]);
+
+  // Close tray when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -97,35 +258,62 @@ export default function NotificationCenter({ onNavigateTab }: NotificationCenter
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const notifications = useMemo(() => {
+    return buildNotificationList(milestones, readIds, dismissedIds);
+  }, [milestones, readIds, dismissedIds]);
+
+  const unreadCount = notifications.filter((n) => n.unread).length;
+
   const handleMarkAllRead = () => {
-    setNotifications(notifications.map((n) => ({ ...n, unread: false })));
+    const unreadIds = notifications.filter((n) => n.unread).map((n) => n.id);
+    const updated = Array.from(new Set([...readIds, ...unreadIds]));
+    setReadIds(updated);
+    saveStoredIds(STORAGE_KEY_READ, updated);
   };
 
   const handleToggleRead = (id: string) => {
-    setNotifications(
-      notifications.map((n) => (n.id === id ? { ...n, unread: !n.unread } : n))
-    );
+    let updated: string[];
+    if (readIds.includes(id)) {
+      updated = readIds.filter((item) => item !== id);
+    } else {
+      updated = [...readIds, id];
+    }
+    setReadIds(updated);
+    saveStoredIds(STORAGE_KEY_READ, updated);
   };
 
   const handleDeleteNotif = (id: string) => {
-    setNotifications(notifications.filter((n) => n.id !== id));
+    const updated = Array.from(new Set([...dismissedIds, id]));
+    setDismissedIds(updated);
+    saveStoredIds(STORAGE_KEY_DISMISSED, updated);
   };
 
   const handleActionClick = (notif: NotificationItem) => {
     if (notif.actionTab) {
       onNavigateTab(notif.actionTab);
       // Mark as read
-      setNotifications(notifications.map((n) => (n.id === notif.id ? { ...n, unread: false } : n)));
+      if (!readIds.includes(notif.id)) {
+        const updated = [...readIds, notif.id];
+        setReadIds(updated);
+        saveStoredIds(STORAGE_KEY_READ, updated);
+      }
       setIsOpen(false);
     }
   };
 
   const filteredNotifications = notifications.filter((n) => {
     if (filter === 'unread') return n.unread;
-    if (filter === 'founder') return n.type === 'founder';
-    if (filter === 'billing') return n.type === 'billing';
+    if (filter === 'milestones') return n.type === 'milestone' || n.type === 'team' || n.id.startsWith('notif-milestone');
+    if (filter === 'system') return n.type === 'system' || n.type === 'welcome' || n.id === 'notif-welcome';
     return true;
   });
+
+  const FILTER_TABS: { id: NotificationFilter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'unread', label: `Unread (${unreadCount})` },
+    { id: 'milestones', label: '🏆 Milestones' },
+    { id: 'system', label: '⚡ System' },
+  ];
 
   return (
     <div ref={containerRef} className="relative">
@@ -194,16 +382,11 @@ export default function NotificationCenter({ onNavigateTab }: NotificationCenter
 
             {/* Filter Pills */}
             <div className="flex items-center gap-1 p-2 px-4 border-b border-border/40 bg-bg/50 overflow-x-auto text-[11px]">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'unread', label: `Unread (${unreadCount})` },
-                { id: 'founder', label: '👑 Founder' },
-                { id: 'billing', label: '💳 Billing' },
-              ].map((tab) => (
+              {FILTER_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setFilter(tab.id as any)}
+                  onClick={() => setFilter(tab.id)}
                   className={`px-3 py-1 rounded-full font-medium transition-all whitespace-nowrap cursor-pointer ${
                     filter === tab.id
                       ? 'bg-accent text-white font-bold shadow-sm'
@@ -219,9 +402,11 @@ export default function NotificationCenter({ onNavigateTab }: NotificationCenter
             <div className="divide-y divide-border/40 overflow-y-auto flex-1">
               {filteredNotifications.length === 0 ? (
                 <div className="p-10 text-center text-text-dim space-y-2">
-                  <div className="text-3xl">📭</div>
-                  <p className="text-xs font-semibold">No notifications in this filter</p>
-                  <p className="text-[11px]">You are all caught up!</p>
+                  <div className="text-3xl">✨</div>
+                  <p className="text-xs font-semibold text-text">{"No new notifications. You're all caught up! ✨"}</p>
+                  <p className="text-[11px] text-text-muted">
+                    Workspace activity and milestone achievements will appear here.
+                  </p>
                 </div>
               ) : (
                 filteredNotifications.map((notif) => (
@@ -249,6 +434,7 @@ export default function NotificationCenter({ onNavigateTab }: NotificationCenter
                             <span className="w-2 h-2 rounded-full bg-accent-light shadow-[0_0_6px_rgba(167,139,250,0.9)]" />
                           )}
                           <button
+                            type="button"
                             onClick={() => handleDeleteNotif(notif.id)}
                             className="opacity-0 group-hover:opacity-100 text-text-dim hover:text-red-400 text-xs p-0.5 transition-opacity cursor-pointer"
                             title="Dismiss"
@@ -306,3 +492,4 @@ export default function NotificationCenter({ onNavigateTab }: NotificationCenter
     </div>
   );
 }
+

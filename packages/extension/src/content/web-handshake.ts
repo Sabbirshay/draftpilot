@@ -6,24 +6,43 @@
 
 export const EXTENSION_VERSION = '0.1.0';
 
-// 1. Instant Synchronous DOM Handshake
-try {
-  if (typeof document !== 'undefined' && document.documentElement) {
-    document.documentElement.setAttribute('data-draftpilot-extension-installed', 'true');
-    document.documentElement.setAttribute('data-draftpilot-extension-version', EXTENSION_VERSION);
-    document.documentElement.setAttribute('data-draftpilot-extension-status', 'ready');
+/**
+ * Sets extension status attributes on <html> element.
+ * Hydration-proof: can be invoked multiple times across page lifecycle.
+ */
+export function applyDomAttributes(): void {
+  try {
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.setAttribute('data-draftpilot-extension-installed', 'true');
+      document.documentElement.setAttribute('data-draftpilot-extension-version', EXTENSION_VERSION);
+      document.documentElement.setAttribute('data-draftpilot-extension-status', 'ready');
+    }
+  } catch {
+    // Ignore in sandboxed contexts
   }
-} catch {
-  // Ignore in sandboxed contexts
 }
 
-// 2. Active Window Message Handshake
+// 1. Instant Synchronous DOM Handshake at document_start
+applyDomAttributes();
+
+// 2. Re-apply on DOMContentLoaded to guarantee attributes persist across Next.js / React hydration
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyDomAttributes);
+  } else {
+    applyDomAttributes();
+  }
+}
+
+// 3. Active Window Message Handshake
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (event) => {
     // Only accept messages originating from the current window
     if (event.source !== window || !event.data) return;
 
     if (event.data.type === 'DRAFTPILOT_EXTENSION_PING') {
+      // Re-apply DOM attributes upon receiving PING
+      applyDomAttributes();
       window.postMessage(
         {
           source: 'draftpilot-extension',
@@ -38,7 +57,7 @@ if (typeof window !== 'undefined') {
     }
   });
 
-  // 3. Proactive Announcement Event
+  // 4. Proactive Announcement Event
   window.postMessage(
     {
       source: 'draftpilot-extension',

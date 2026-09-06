@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { DEMO_DRAFT_EXAMPLE, DEMO_MACROS, DEMO_STATS } from '@/data/demo-data';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useExtensionStatus } from '@/hooks/useExtensionStatus';
 import ConfettiCelebration from './ConfettiCelebration';
 
 export interface OnboardingState {
@@ -61,6 +62,16 @@ export default function OnboardingDashboard({
     viewed_demo: Boolean(onboardingState.viewed_demo),
   });
 
+  // Connect authentic extension detection hook with account pairing fallback
+  const {
+    isInstalled: isExtDetected,
+    version: extVersion,
+    status: extStatus,
+    recheck: recheckExtension,
+  } = useExtensionStatus({
+    accountInstalled: Boolean(onboardingState?.extension_installed || localSteps.extension_installed),
+  });
+
   const firstName = userName?.split(' ')[0] || userName?.split('@')[0] || 'there';
 
   // Sync with incoming prop changes
@@ -88,17 +99,64 @@ export default function OnboardingDashboard({
     [onUpdateOnboarding]
   );
 
+  // Reactive auto-unlock when extension is detected (client-side or cloud-synced)
+  useEffect(() => {
+    if ((isExtDetected || onboardingState?.extension_installed) && !localSteps.extension_installed) {
+      updateStep('extension_installed', true);
+
+      const celebrationKey = 'draftpilot_celebrated_badge_extension';
+      let alreadyCelebrated = false;
+      try {
+        alreadyCelebrated = localStorage.getItem(celebrationKey) === 'true';
+      } catch {}
+
+      if (!alreadyCelebrated) {
+        setCelebrationConfig({
+          isActive: true,
+          title: '🧩 Extension Pioneer Unlocked!',
+          message: `Chrome extension (${extVersion ? `v${extVersion}` : 'v0.1.0'}) connected! DraftPilot will now display inline assistance in Gmail.`,
+          badgeName: 'Extension Pioneer',
+          badgeIcon: '🧩',
+        });
+        try {
+          localStorage.setItem(celebrationKey, 'true');
+        } catch {}
+      }
+    }
+  }, [isExtDetected, onboardingState?.extension_installed, localSteps.extension_installed, extVersion, updateStep]);
+
   // Auto-detection logic on mount
   useEffect(() => {
     async function autoDetectMilestones() {
-      // 1. Check Extension Handshake
-      if (typeof document !== 'undefined') {
-        const isExtInstalled =
-          document.documentElement.getAttribute('data-draftpilot-extension-installed') === 'true' ||
-          localStorage.getItem('draftpilot_extension_installed') === 'true';
+      // 1. Check Extension Handshake & Account State
+      const isExtInstalled =
+        (typeof document !== 'undefined' &&
+          document.documentElement.getAttribute('data-draftpilot-extension-installed') === 'true') ||
+        (typeof localStorage !== 'undefined' &&
+          localStorage.getItem('draftpilot_extension_installed') === 'true') ||
+        Boolean(onboardingState?.extension_installed) ||
+        isExtDetected;
 
-        if (isExtInstalled && !localSteps.extension_installed) {
-          updateStep('extension_installed', true);
+      if (isExtInstalled && !localSteps.extension_installed) {
+        updateStep('extension_installed', true);
+
+        const celebrationKey = 'draftpilot_celebrated_badge_extension';
+        let alreadyCelebrated = false;
+        try {
+          alreadyCelebrated = localStorage.getItem(celebrationKey) === 'true';
+        } catch {}
+
+        if (!alreadyCelebrated) {
+          setCelebrationConfig({
+            isActive: true,
+            title: '🧩 Extension Pioneer Unlocked!',
+            message: 'Chrome extension connected! DraftPilot will now display inline assistance in Gmail.',
+            badgeName: 'Extension Pioneer',
+            badgeIcon: '🧩',
+          });
+          try {
+            localStorage.setItem(celebrationKey, 'true');
+          } catch {}
         }
       }
 
@@ -117,6 +175,34 @@ export default function OnboardingDashboard({
       const teamId = dbUser?.team_id;
       if (teamId) {
         try {
+          // Check onboarding_state for extension and gmail status
+          const { data: obData } = await supabase
+            .from('onboarding_state')
+            .select('extension_installed, gmail_connected')
+            .eq('team_id', teamId)
+            .maybeSingle();
+
+          if (obData?.extension_installed && !localSteps.extension_installed) {
+            updateStep('extension_installed', true);
+            const celebrationKey = 'draftpilot_celebrated_badge_extension';
+            let alreadyCelebrated = false;
+            try {
+              alreadyCelebrated = localStorage.getItem(celebrationKey) === 'true';
+            } catch {}
+            if (!alreadyCelebrated) {
+              setCelebrationConfig({
+                isActive: true,
+                title: '🧩 Extension Pioneer Unlocked!',
+                message: 'Chrome extension connected! DraftPilot will now display inline assistance in Gmail.',
+                badgeName: 'Extension Pioneer',
+                badgeIcon: '🧩',
+              });
+              try {
+                localStorage.setItem(celebrationKey, 'true');
+              } catch {}
+            }
+          }
+
           // Check macros
           const { count: macroCount } = await supabase
             .from('macros')
@@ -150,7 +236,7 @@ export default function OnboardingDashboard({
     }
 
     autoDetectMilestones();
-  }, [dbUser, localSteps, updateStep]);
+  }, [dbUser, localSteps, updateStep, onboardingState?.extension_installed, isExtDetected]);
 
   // The 4 Core Required Steps
   const steps = [
@@ -781,6 +867,9 @@ export default function OnboardingDashboard({
                   onClick={() => {
                     updateStep('extension_installed', true);
                     setIsInstallModalOpen(false);
+                    try {
+                      localStorage.setItem('draftpilot_celebrated_badge_extension', 'true');
+                    } catch {}
                     setCelebrationConfig({
                       isActive: true,
                       title: '🧩 Extension Pioneer Unlocked!',

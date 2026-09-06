@@ -25,7 +25,8 @@
   ],
   "host_permissions": [
     "*://mail.google.com/*",
-    "http://localhost/*",
+    "*://localhost/*",
+    "*://127.0.0.1/*",
     "https://*.vercel.app/*"
   ],
   "background": {
@@ -39,10 +40,8 @@
     },
     {
       "matches": [
-        "http://localhost/*",
-        "http://localhost:*/*",
-        "http://127.0.0.1/*",
-        "http://127.0.0.1:*/*",
+        "*://localhost/*",
+        "*://127.0.0.1/*",
         "https://*.vercel.app/*"
       ],
       "js": ["web-handshake.js"],
@@ -53,6 +52,6 @@
     "default_path": "src/sidepanel/index.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://*.supabase.co https://draftpilot-web.vercel.app;"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://*.supabase.co https://draftpilot-web.vercel.app http://localhost:* http://127.0.0.1:*;"
   }
 }

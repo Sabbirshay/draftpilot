@@ -5,8 +5,10 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useExtensionStatus } from '@/hooks/useExtensionStatus';
 
 export default function GmailSyncManager() {
-  const { dbUser, user } = useAuth();
-  const { status: extStatus, version: extVersion, recheck } = useExtensionStatus();
+  const { dbUser, user, onboardingState, refreshOnboardingState } = useAuth();
+  const { status: extStatus, version: extVersion, recheck } = useExtensionStatus({
+    accountInstalled: Boolean(onboardingState?.extension_installed),
+  });
   const teamId = dbUser?.team_id || user?.id || 'team';
   const apiKey = `dp_live_${teamId.replace(/-/g, '').slice(0, 20)}`;
   const [copied, setCopied] = useState(false);
@@ -20,6 +22,13 @@ export default function GmailSyncManager() {
       navigator.clipboard.writeText(apiKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleRecheck = async () => {
+    recheck();
+    if (refreshOnboardingState) {
+      await refreshOnboardingState().catch(() => {});
     }
   };
 
@@ -40,7 +49,7 @@ export default function GmailSyncManager() {
     descriptionEl = <span>Detecting DraftPilot extension handshake in browser...</span>;
     actionEl = (
       <button
-        onClick={recheck}
+        onClick={handleRecheck}
         className="px-4 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs font-semibold text-text transition-colors cursor-pointer"
       >
         Recheck Status
@@ -48,10 +57,11 @@ export default function GmailSyncManager() {
     );
   } else if (extStatus === 'installed') {
     iconBg = 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400';
+    const displayVersion = extVersion ? `v${extVersion}` : 'v0.1.0';
     badgeEl = (
-      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1.5">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-        Installed &amp; Ready {extVersion ? `(v${extVersion})` : ''}
+      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1.5 border border-emerald-500/30 shadow-sm">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+        Installed &amp; Ready ({displayVersion})
       </span>
     );
     descriptionEl = (
@@ -60,21 +70,39 @@ export default function GmailSyncManager() {
       </span>
     );
     actionEl = (
-      <button
-        onClick={() =>
-          alert(
-            'Extension Ready! Open mail.google.com, click reply on any customer email, and activate DraftPilot in the side panel.'
-          )
-        }
-        className="px-4 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs font-semibold text-text transition-colors cursor-pointer"
-      >
-        View Install Guide →
-      </button>
+      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+        <button
+          onClick={handleRecheck}
+          title="Recheck extension presence"
+          className="px-3 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
+        >
+          🔄 Recheck
+        </button>
+        <a
+          href="/draftpilot-extension.zip"
+          download="draftpilot-extension.zip"
+          title="Download latest extension zip"
+          className="px-3.5 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs font-semibold text-text transition-colors cursor-pointer flex items-center gap-1.5"
+        >
+          <span>⬇️</span>
+          <span>Download .ZIP</span>
+        </a>
+        <button
+          onClick={() =>
+            alert(
+              'Extension Ready! Open mail.google.com, click reply on any customer email, and activate DraftPilot in the side panel.'
+            )
+          }
+          className="px-4 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs font-semibold text-text transition-colors cursor-pointer"
+        >
+          View Guide →
+        </button>
+      </div>
     );
   } else if (extStatus === 'outdated') {
     iconBg = 'bg-amber-500/15 border-amber-500/30 text-amber-400';
     badgeEl = (
-      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold flex items-center gap-1.5">
+      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold flex items-center gap-1.5 border border-amber-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
         Outdated Version {extVersion ? `(v${extVersion})` : ''}
       </span>
@@ -85,22 +113,29 @@ export default function GmailSyncManager() {
       </span>
     );
     actionEl = (
-      <button
-        onClick={() =>
-          alert(
-            'To update: Open chrome://extensions, enable Developer Mode, and click "Update" or reload the unpacked extension.'
-          )
-        }
-        className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 text-xs font-semibold text-amber-300 transition-colors cursor-pointer"
-      >
-        Update Extension →
-      </button>
+      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+        <button
+          onClick={handleRecheck}
+          title="Recheck extension presence"
+          className="px-3 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
+        >
+          🔄 Recheck
+        </button>
+        <a
+          href="/draftpilot-extension.zip"
+          download="draftpilot-extension.zip"
+          className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 text-xs font-semibold text-amber-300 transition-colors cursor-pointer flex items-center gap-1.5"
+        >
+          <span>⬇️</span>
+          <span>Update via .ZIP</span>
+        </a>
+      </div>
     );
   } else {
     // not_installed
     iconBg = 'bg-rose-500/15 border-rose-500/30 text-rose-400';
     badgeEl = (
-      <span className="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 text-[10px] font-bold flex items-center gap-1.5">
+      <span className="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 text-[10px] font-bold flex items-center gap-1.5 border border-rose-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-rose-400 inline-block" />
         Not Installed
       </span>
@@ -111,23 +146,31 @@ export default function GmailSyncManager() {
       </span>
     );
     actionEl = (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
         <button
-          onClick={recheck}
+          onClick={handleRecheck}
           title="Recheck extension presence"
           className="px-3 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
         >
           🔄 Recheck
         </button>
+        <a
+          href="/draftpilot-extension.zip"
+          download="draftpilot-extension.zip"
+          className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] flex items-center gap-1.5 cursor-pointer"
+        >
+          <span>⬇️</span>
+          <span>Download .ZIP</span>
+        </a>
         <button
           onClick={() =>
             alert(
-              '1-Click Install Instructions:\n1. Open Chrome > Extensions (chrome://extensions)\n2. Enable Developer mode (top right toggle)\n3. Click "Load unpacked" and select the packages/extension/dist directory.'
+              '1-Click Install Instructions:\n1. Download draftpilot-extension.zip\n2. Open Chrome > Extensions (chrome://extensions)\n3. Enable Developer mode (top right toggle)\n4. Click "Load unpacked" and select the extracted folder.'
             )
           }
-          className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(124,58,237,0.4)] cursor-pointer"
+          className="px-3 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
         >
-          1-Click Install Guide →
+          Install Guide →
         </button>
       </div>
     );

@@ -35,6 +35,8 @@ class SidePanel {
       this.loadUserData(data);
       await this.loadMacros();
       this.pollActiveTabForThread();
+      // Record heartbeat pairing telemetry so returning users pair immediately
+      apiClient.recordHeartbeat().catch(() => {});
     } catch {
       this.showView('login-view');
     }
@@ -164,6 +166,7 @@ class SidePanel {
 
         document.getElementById('draft-result-container')?.classList.remove('hidden');
         await this.loadUsage();
+        apiClient.recordHeartbeat().catch(() => {});
       } catch (err: any) {
         alert(`Draft error: ${err.message}`);
       } finally {

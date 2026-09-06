@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vite build && cp manifest.json dist/ && cp -r icons dist/",
+    "build": "vite build && cp manifest.json dist/ && cp -r icons dist/ && node scripts/build-zip.js",
     "test": "node --experimental-strip-types --test src/utils/__tests__/*.test.ts",
     "lint": "echo 'Extension package lint verified'"
   },

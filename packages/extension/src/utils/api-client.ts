@@ -312,10 +312,30 @@ export class ApiClient {
       teamId: teamId || authUser.id,
     });
 
-    // Mark extension as installed & connected in onboarding_state
+    // Mark extension as installed & connected in onboarding_state and server heartbeat
+    await this.recordHeartbeat().catch(() => {});
+
+    return {
+      accessToken: token,
+      user: dbUser || { email: authUser.email, teams: { name: teamName, plan } },
+    };
+  }
+
+  /**
+   * Records extension presence and pairing telemetry to both Supabase onboarding_state
+   * and the web server's /api/extension/heartbeat endpoint.
+   */
+  async recordHeartbeat(): Promise<boolean> {
+    const token = await this.getToken();
+    const teamId = await this.getTeamId();
+    if (!token) return false;
+
+    let synced = false;
+
+    // 1. Direct Supabase onboarding_state update
     if (teamId) {
       try {
-        await fetch(
+        const res = await fetch(
           `${SUPABASE_URL}/rest/v1/onboarding_state?team_id=eq.${teamId}`,
           {
             method: 'PATCH',
@@ -332,15 +352,36 @@ export class ApiClient {
             }),
           }
         );
+        if (res.ok) {
+          synced = true;
+        }
       } catch {
-        // Ignore
+        // Ignore network errors in direct patch
       }
     }
 
-    return {
-      accessToken: token,
-      user: dbUser || { email: authUser.email, teams: { name: teamName, plan } },
-    };
+    // 2. Web server heartbeat route (/api/extension/heartbeat)
+    try {
+      const hbRes = await fetch('https://draftpilot-web.vercel.app/api/extension/heartbeat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          version: '0.1.0',
+          client: 'draftpilot-extension',
+          timestamp: Date.now(),
+        }),
+      });
+      if (hbRes.ok) {
+        synced = true;
+      }
+    } catch {
+      // Ignore network errors
+    }
+
+    return synced;
   }
 
   async register(email: string, password: string, teamName: string) {
@@ -705,6 +746,9 @@ export class ApiClient {
         console.warn('Telemetry logging note:', err);
       }
     }
+
+    // 7. Record heartbeat pairing telemetry on draft generation
+    this.recordHeartbeat().catch(() => {});
 
     return {
       draft: draftText,
