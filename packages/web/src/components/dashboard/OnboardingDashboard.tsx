@@ -175,10 +175,10 @@ export default function OnboardingDashboard({
       const teamId = dbUser?.team_id;
       if (teamId) {
         try {
-          // Check onboarding_state for extension and gmail status
+          // Check onboarding_state for extension, gmail, and draft milestone status
           const { data: obData } = await supabase
             .from('onboarding_state')
-            .select('extension_installed, gmail_connected')
+            .select('extension_installed, gmail_connected, first_draft_generated')
             .eq('team_id', teamId)
             .maybeSingle();
 
@@ -212,13 +212,33 @@ export default function OnboardingDashboard({
             updateStep('first_macro_added', true);
           }
 
-          // Check draft history
+          // Check draft history OR onboarding_state.first_draft_generated
+          const draftMilestoneFromState = obData?.first_draft_generated === true;
           const { count: draftsCount } = await supabase
             .from('draft_history')
             .select('*', { count: 'exact', head: true })
             .eq('team_id', teamId);
-          if (draftsCount && draftsCount > 0 && !localSteps.first_draft_generated) {
+          if ((draftMilestoneFromState || (draftsCount && draftsCount > 0)) && !localSteps.first_draft_generated) {
             updateStep('first_draft_generated', true);
+
+            // Trigger "AI Copilot Ace" celebration if not already shown
+            const celebrationKey = 'draftpilot_celebrated_badge_draft';
+            let alreadyCelebrated = false;
+            try {
+              alreadyCelebrated = localStorage.getItem(celebrationKey) === 'true';
+            } catch {}
+            if (!alreadyCelebrated) {
+              setCelebrationConfig({
+                isActive: true,
+                title: '🎉 AI Copilot Ace Unlocked!',
+                message: 'Your first AI draft has been generated! DraftPilot is now synthesizing context-aware replies for your team.',
+                badgeName: 'AI Copilot Ace',
+                badgeIcon: '⚡',
+              });
+              try {
+                localStorage.setItem(celebrationKey, 'true');
+              } catch {}
+            }
           }
 
           // Check team members

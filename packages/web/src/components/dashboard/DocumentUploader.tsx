@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import * as XLSX from 'xlsx';
 
 export interface UploadedDoc {
   id: string;
@@ -208,16 +209,132 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
     const fileSizeStr = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
 
     try {
-      // Read text content
-      const fileText = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve((e.target?.result as string) || '');
-        reader.onerror = () => resolve(`Document: ${file.name}\nImported knowledge base reference.`);
-        reader.readAsText(file);
-      });
+      const isSpreadsheet = ['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
+
+      let fileText = '';
+      let spreadsheetMacros: { name: string; category: string; tags: string[]; content: string }[] = [];
+
+      if (isSpreadsheet) {
+        // Read binary Excel/CSV files using SheetJS for proper cell extraction
+        setUploadStatus(`Parsing spreadsheet ${file.name}...`);
+        const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as ArrayBuffer);
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsArrayBuffer(file);
+        });
+
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const textParts: string[] = [];
+
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet) continue;
+
+          // Convert sheet to array of arrays (rows)
+          const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as string[][];
+          if (rows.length === 0) continue;
+
+          // Extract header row for structured context
+          const headers = rows[0].map((h: any) => String(h || '').trim());
+          const hasHeaders = headers.some((h) => h.length > 0);
+
+          if (workbook.SheetNames.length > 1) {
+            textParts.push(`## Sheet: ${sheetName}`);
+          }
+
+          if (hasHeaders) {
+            textParts.push(`Columns: ${headers.filter((h) => h).join(' | ')}`);
+          }
+
+          // Process data rows into structured text and extract per-row macros
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.every((cell: any) => !String(cell || '').trim())) continue;
+
+            // Build structured row text with column headers as keys
+            const rowParts: string[] = [];
+            const rowValues: Record<string, string> = {};
+            for (let c = 0; c < row.length; c++) {
+              const cellVal = String(row[c] || '').trim();
+              if (!cellVal) continue;
+              const colName = hasHeaders && headers[c] ? headers[c] : `Column ${c + 1}`;
+              rowParts.push(`${colName}: ${cellVal}`);
+              rowValues[colName.toLowerCase()] = cellVal;
+            }
+
+            if (rowParts.length > 0) {
+              textParts.push(rowParts.join('\n'));
+              textParts.push(''); // blank line separator
+
+              // Extract structured macro from row if it has an identifiable topic
+              const topicKey = Object.keys(rowValues).find((k) =>
+                ['issue', 'topic', 'question', 'subject', 'category', 'type', 'sl', 'title', 'name'].includes(k)
+              );
+              const bodyKey = Object.keys(rowValues).find((k) =>
+                k.includes('mail body') || k.includes('answer') || k.includes('response') ||
+                k.includes('content') || k.includes('body') || k.includes('resolution') ||
+                k.includes('reply') || k.includes('english')
+              );
+
+              // Determine macro topic name
+              let macroName = '';
+              if (topicKey && rowValues[topicKey] && rowValues[topicKey].length > 1) {
+                macroName = rowValues[topicKey];
+              } else if (bodyKey && rowValues[bodyKey]) {
+                // Use first few words of body as topic if no explicit topic column
+                macroName = rowValues[bodyKey].split(/\s+/).slice(0, 5).join(' ');
+              }
+
+              if (macroName && macroName.length > 1) {
+                // Collect all non-SL, non-topic cell values as macro content
+                const contentParts = Object.entries(rowValues)
+                  .filter(([k]) => k !== 'sl' && k !== topicKey)
+                  .map(([k, v]) => `${k}: ${v}`);
+
+                const macroContent = contentParts.length > 0
+                  ? `Hi {{name}},\n\nRegarding ${macroName}:\n\n${contentParts.join('\n')}\n\nPlease let me know if you need any further assistance!\nSupport Team`
+                  : '';
+
+                if (macroContent) {
+                  // Generate search tags from all cell values
+                  const allText = Object.values(rowValues).join(' ').toLowerCase();
+                  const tags = allText
+                    .replace(/[^a-z0-9\s]/g, ' ')
+                    .split(/\s+/)
+                    .filter((w) => w.length > 3)
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .slice(0, 8);
+
+                  spreadsheetMacros.push({
+                    name: macroName.length > 50 ? macroName.slice(0, 47) + '...' : macroName,
+                    category: 'Knowledge Base',
+                    tags: ['knowledge-base', 'excel-import', ...tags],
+                    content: macroContent,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        fileText = textParts.join('\n');
+      } else {
+        // Non-spreadsheet files: read as text
+        fileText = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || '');
+          reader.onerror = () => resolve(`Document: ${file.name}\nImported knowledge base reference.`);
+          reader.readAsText(file);
+        });
+      }
 
       setUploadStatus(`Extracting support macros from ${file.name}...`);
-      const extractedMacros = extractMacrosFromText(file.name, fileText);
+
+      // Use spreadsheet-extracted macros if available, otherwise fall back to text-based extraction
+      const extractedMacros = spreadsheetMacros.length > 0
+        ? spreadsheetMacros.slice(0, 10)
+        : extractMacrosFromText(file.name, fileText);
 
       // Insert document record in Supabase
       const { data: docData, error: docErr } = await supabase
@@ -252,18 +369,56 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
       if (fileText && fileText.trim().length > 20) {
         try {
           const chunks: { document_id: string; team_id: string; chunk_text: string; chunk_index: number }[] = [];
-          const paragraphs = fileText.split(/\n\s*\n/);
-          let chunkIdx = 0;
 
-          for (const para of paragraphs) {
-            const cleanPara = para.trim();
-            if (cleanPara.length > 20) {
+          // For spreadsheets, chunk by logical row blocks rather than paragraph splits
+          if (isSpreadsheet) {
+            // Split on double newlines (row separators) for more meaningful chunks
+            const sections = fileText.split(/\n\n+/);
+            let chunkIdx = 0;
+            let currentChunk = '';
+
+            for (const section of sections) {
+              const trimmed = section.trim();
+              if (!trimmed) continue;
+
+              // Accumulate sections into chunks of ~800 chars max for better retrieval
+              if (currentChunk.length + trimmed.length > 800 && currentChunk.length > 20) {
+                chunks.push({
+                  document_id: docData.id,
+                  team_id: teamId,
+                  chunk_text: currentChunk.trim().slice(0, 1000),
+                  chunk_index: chunkIdx++,
+                });
+                currentChunk = trimmed;
+              } else {
+                currentChunk += (currentChunk ? '\n\n' : '') + trimmed;
+              }
+            }
+
+            // Push remaining content
+            if (currentChunk.trim().length > 20) {
               chunks.push({
                 document_id: docData.id,
                 team_id: teamId,
-                chunk_text: cleanPara.slice(0, 1000),
+                chunk_text: currentChunk.trim().slice(0, 1000),
                 chunk_index: chunkIdx++,
               });
+            }
+          } else {
+            // Original paragraph-based chunking for text documents
+            const paragraphs = fileText.split(/\n\s*\n/);
+            let chunkIdx = 0;
+
+            for (const para of paragraphs) {
+              const cleanPara = para.trim();
+              if (cleanPara.length > 20) {
+                chunks.push({
+                  document_id: docData.id,
+                  team_id: teamId,
+                  chunk_text: cleanPara.slice(0, 1000),
+                  chunk_index: chunkIdx++,
+                });
+              }
             }
           }
 

@@ -465,39 +465,84 @@ export class ApiClient {
     if (!token || !teamId || !queryText) return [];
 
     try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/document_chunks?team_id=eq.${teamId}&select=chunk_text&limit=40`,
-        {
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-          },
+      // Fetch both document_chunks and macros in parallel for comprehensive KB search
+      const [chunksRes, macrosRes] = await Promise.all([
+        fetch(
+          `${SUPABASE_URL}/rest/v1/document_chunks?team_id=eq.${teamId}&select=chunk_text&limit=40`,
+          {
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        ),
+        fetch(
+          `${SUPABASE_URL}/rest/v1/macros?team_id=eq.${teamId}&select=name,content,tags&limit=30`,
+          {
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        ),
+      ]);
+
+      const chunks = chunksRes.ok ? ((await chunksRes.json()) as { chunk_text: string }[]) : [];
+      const macros = macrosRes.ok ? ((await macrosRes.json()) as { name: string; content: string; tags?: string[] }[]) : [];
+
+      // Build unified search corpus from chunks + macro content
+      const searchItems: { text: string; source: string }[] = [];
+
+      for (const c of chunks) {
+        if (c.chunk_text && c.chunk_text.trim().length > 10) {
+          searchItems.push({ text: c.chunk_text, source: 'chunk' });
         }
-      );
+      }
 
-      if (!res.ok) return [];
-      const chunks = (await res.json()) as { chunk_text: string }[];
-      if (!chunks || chunks.length === 0) return [];
+      for (const m of macros) {
+        if (m.content && m.content.trim().length > 10) {
+          // Include macro name + tags in searchable text for better keyword matching
+          const macroSearchText = [
+            m.name || '',
+            m.content,
+            ...(m.tags || []),
+          ].join(' ');
+          searchItems.push({ text: macroSearchText, source: 'macro' });
+        }
+      }
 
+      if (searchItems.length === 0) return [];
+
+      // Enhanced keyword extraction: include shorter words (3+ chars) and preserve key terms
       const lowerQuery = queryText.toLowerCase();
       const keywords = lowerQuery
         .replace(/[^a-z0-9\s]/g, ' ')
         .split(/\s+/)
-        .filter((w) => w.length > 3);
+        .filter((w) => w.length > 2);
 
-      const scored = chunks.map((c) => {
-        const lowerChunk = c.chunk_text.toLowerCase();
+      // Score each item with improved matching: exact keyword match + partial/substring match
+      const scored = searchItems.map((item) => {
+        const lowerText = item.text.toLowerCase();
         let score = 0;
         for (const kw of keywords) {
-          if (lowerChunk.includes(kw)) score += 1;
+          if (lowerText.includes(kw)) {
+            // Full keyword match — higher weight for longer keywords
+            score += kw.length >= 5 ? 3 : 2;
+          } else if (kw.length >= 4) {
+            // Check if any word in the text starts with the keyword (prefix match)
+            const words = lowerText.split(/\s+/);
+            if (words.some((w) => w.startsWith(kw) || kw.startsWith(w))) {
+              score += 1;
+            }
+          }
         }
-        return { text: c.chunk_text, score };
+        return { text: item.text, score };
       });
 
       return scored
         .filter((s) => s.score > 0)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
+        .slice(0, 5)
         .map((s) => s.text);
     } catch {
       return [];

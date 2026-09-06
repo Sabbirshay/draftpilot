@@ -337,8 +337,67 @@ CRITICAL INSTRUCTIONS:
         if (matchedMacro?.content) {
           knowledgeContext += `### Recommended Support Macro & Policy:\n${matchedMacro.content}\n\n`;
         }
-        if (kbSnippets && kbSnippets.length > 0) {
-          knowledgeContext += `### Knowledge Base & Documentation Context:\n${kbSnippets.join('\n---\n')}\n\n`;
+
+        // Use client-provided KB snippets, or fetch server-side as fallback
+        let effectiveKbSnippets = kbSnippets && kbSnippets.length > 0 ? kbSnippets : [];
+
+        // Server-side KB retrieval fallback: if client sent no snippets, search directly
+        if (effectiveKbSnippets.length === 0 && teamId && scrubbedThreadContent) {
+          try {
+            const queryKeywords = scrubbedThreadContent
+              .toLowerCase()
+              .replace(/[^a-z0-9\s]/g, ' ')
+              .split(/\s+/)
+              .filter((w: string) => w.length > 2);
+
+            // Fetch document chunks
+            const { data: serverChunks } = await supabaseAdmin
+              .from('document_chunks')
+              .select('chunk_text')
+              .eq('team_id', teamId)
+              .limit(50);
+
+            // Fetch macros
+            const { data: serverMacros } = await supabaseAdmin
+              .from('macros')
+              .select('name, content, tags')
+              .eq('team_id', teamId)
+              .limit(30);
+
+            const searchItems: { text: string; score: number }[] = [];
+
+            for (const chunk of serverChunks || []) {
+              if (!chunk.chunk_text || chunk.chunk_text.trim().length < 10) continue;
+              const lower = chunk.chunk_text.toLowerCase();
+              let score = 0;
+              for (const kw of queryKeywords) {
+                if (lower.includes(kw)) score += kw.length >= 5 ? 3 : 2;
+              }
+              if (score > 0) searchItems.push({ text: chunk.chunk_text, score });
+            }
+
+            for (const macro of serverMacros || []) {
+              if (!macro.content || macro.content.trim().length < 10) continue;
+              const searchText = [macro.name || '', macro.content, ...(macro.tags || [])].join(' ');
+              const lower = searchText.toLowerCase();
+              let score = 0;
+              for (const kw of queryKeywords) {
+                if (lower.includes(kw)) score += kw.length >= 5 ? 3 : 2;
+              }
+              if (score > 0) searchItems.push({ text: searchText, score });
+            }
+
+            effectiveKbSnippets = searchItems
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5)
+              .map((s) => s.text);
+          } catch (kbErr) {
+            console.warn('Server-side KB retrieval note:', kbErr);
+          }
+        }
+
+        if (effectiveKbSnippets.length > 0) {
+          knowledgeContext += `### Knowledge Base & Documentation Context:\n${effectiveKbSnippets.join('\n---\n')}\n\n`;
         }
 
         let agentGuidanceContext = '';
@@ -475,6 +534,32 @@ CRITICAL INSTRUCTIONS:
             month,
             draft_count: 1,
           });
+        }
+
+        // 5b. Auto-unlock AI Draft onboarding milestone
+        // Upsert onboarding_state to mark first_draft_generated = true
+        // so the dashboard detects the milestone and unlocks the "AI Copilot Ace" badge
+        try {
+          const { data: existingOb } = await supabaseAdmin
+            .from('onboarding_state')
+            .select('id, first_draft_generated')
+            .eq('team_id', teamId)
+            .maybeSingle();
+
+          if (existingOb) {
+            if (!existingOb.first_draft_generated) {
+              await supabaseAdmin
+                .from('onboarding_state')
+                .update({ first_draft_generated: true })
+                .eq('id', existingOb.id);
+            }
+          } else {
+            await supabaseAdmin
+              .from('onboarding_state')
+              .insert({ team_id: teamId, first_draft_generated: true });
+          }
+        } catch (obErr) {
+          console.warn('Onboarding milestone update note:', obErr);
         }
       } catch (histErr) {
         console.warn('Draft history / usage logging note:', histErr);
