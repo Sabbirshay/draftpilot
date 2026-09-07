@@ -1,4 +1,4 @@
-import { scrubPII } from './pii-scrubber';
+import { scrubPII } from './pii-scrubber.ts';
 
 const SUPABASE_URL = 'https://amjliubpbysvtiqpbgnh.supabase.co';
 const SUPABASE_ANON_KEY =
@@ -61,9 +61,16 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
   while (prevText !== text) {
     prevText = text;
     text = text
-      .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|Subject:[^\n]*|Email:?|Suggested Reply:?)\s*\n+/i, '')
+      .replace(
+        /^(?:\*\*)?(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|(?:Subject|Re):\s*[^\n]*|Email:?|Suggested Reply:?)(?:\*\*)?\s*\n+/i,
+        ''
+      )
       .trim();
   }
+
+  // 5b. Strip trailing tip/note postscripts
+  text = text.replace(/\n+---\s*\n+\*?(?:Tip|Note):?[\s\S]*$/i, '').trim();
+  text = text.replace(/\n+\*(?:Tip|Note):?[\s\S]*$/i, '').trim();
 
   // 6. Template Variable Normalization
   text = text
@@ -82,6 +89,8 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
     .replace(/\[Representative Name\]/gi, defaultSignoff)
     .replace(/\[Your Title\]/gi, defaultSignoff)
     .replace(/\[Company Name\]/gi, 'DraftPilot Support')
+    .replace(/\[Company\]/gi, 'DraftPilot Support')
+    .replace(/\[Contact Information\]/gi, 'support@draftpilot.com')
     .replace(/\[Support Team\]/gi, defaultSignoff)
     .replace(/{{agent_name}}/gi, defaultSignoff);
 
@@ -101,7 +110,7 @@ export function extractSenderName(text: string): string {
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Z][a-z]+)/i);
+  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
@@ -116,11 +125,45 @@ export function extractSenderName(text: string): string {
     }
   }
   if (signMatch && signMatch[1]) {
-    return signMatch[1].trim();
+    const clean = signMatch[1].trim();
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
+    if (!blacklist.includes(clean.toLowerCase())) {
+      return clean;
+    }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = ['there', 'team', 'support', 'all', 'everyone', 'sir', 'madam', 'can', 'could', 'would', 'please'];
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
     if (!blacklist.includes(candidate.toLowerCase())) {
       return candidate;
     }
@@ -130,6 +173,7 @@ export function extractSenderName(text: string): string {
 
 export class ApiClient {
   private baseUrl = SUPABASE_URL;
+  private webUrl = 'https://draftpilot-web.vercel.app';
   private settingsCache: { data: any; timestamp: number } | null = null;
 
   constructor() {
@@ -137,9 +181,21 @@ export class ApiClient {
   }
 
   private async initBaseUrl() {
-    const data = await chrome.storage.local.get(['apiUrl']);
-    if (data.apiUrl) {
-      this.baseUrl = data.apiUrl;
+    try {
+      if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        const data = await chrome.storage.local.get(['apiUrl', 'webUrl']);
+        if (data.apiUrl) {
+          this.baseUrl = data.apiUrl;
+          if (data.apiUrl.includes('localhost') || data.apiUrl.includes('127.0.0.1')) {
+            this.webUrl = data.apiUrl.replace(/\/$/, '');
+          }
+        }
+        if (data.webUrl) {
+          this.webUrl = data.webUrl.replace(/\/$/, '');
+        }
+      }
+    } catch {
+      // Chrome storage not available in node/test environments
     }
   }
 
@@ -362,7 +418,7 @@ export class ApiClient {
 
     // 2. Web server heartbeat route (/api/extension/heartbeat)
     try {
-      const hbRes = await fetch('https://draftpilot-web.vercel.app/api/extension/heartbeat', {
+      const hbRes = await fetch(`${this.webUrl}/api/extension/heartbeat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -656,37 +712,56 @@ export class ApiClient {
     // 4. Request draft generation securely from server endpoint (keeping API keys server-side)
     let draftText = '';
     let serverSuccess = false;
+    let draftSource: 'openrouter' | 'macro' | 'template' = 'template';
 
     if (token) {
       try {
-        const genRes = await fetch('https://draftpilot-web.vercel.app/api/drafts/generate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            threadContent: scrubbed,
-            macroHint: macroHint || '',
-            matchedMacro,
-            kbSnippets,
-          }),
-        });
-
-        if (genRes.status === 403) {
-          const genData = await genRes.json().catch(() => ({}));
-          const errorMsg = genData.error || 'Account deactivated. Please contact support.';
-          const banError = new Error(errorMsg);
-          (banError as any).banned = true;
-          (banError as any).status = 403;
-          throw banError;
+        const candidateUrls = [`${this.webUrl}/api/drafts/generate`];
+        if (!this.webUrl.includes('localhost') && !this.webUrl.includes('127.0.0.1')) {
+          candidateUrls.push('http://localhost:3000/api/drafts/generate');
         }
 
-        if (genRes.ok) {
+        let genRes: Response | null = null;
+        for (const url of candidateUrls) {
+          try {
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                threadContent: scrubbed,
+                macroHint: macroHint || '',
+                matchedMacro,
+                kbSnippets,
+              }),
+            });
+
+            if (res.status === 403) {
+              const genData = await res.json().catch(() => ({}));
+              const errorMsg = genData.error || 'Account deactivated. Please contact support.';
+              const banError = new Error(errorMsg);
+              (banError as any).banned = true;
+              (banError as any).status = 403;
+              throw banError;
+            }
+
+            if (res.ok) {
+              genRes = res;
+              break;
+            }
+          } catch (fetchErr: any) {
+            if (fetchErr?.banned || fetchErr?.status === 403) throw fetchErr;
+          }
+        }
+
+        if (genRes && genRes.ok) {
           const genData = await genRes.json();
           if (genData.draft) {
             draftText = genData.draft;
             serverSuccess = true;
+            draftSource = genData.source || 'openrouter';
           }
         }
       } catch (err: any) {
@@ -700,6 +775,7 @@ export class ApiClient {
     // 5. High-Fidelity Grounded Fallback if server was offline
     if (!serverSuccess) {
       if (matchedMacro) {
+        draftSource = 'macro';
         draftText = matchedMacro.content
           .replace(/{{name}}/g, customerName)
           .replace(/{{customer_name}}/g, customerName)
@@ -711,6 +787,7 @@ export class ApiClient {
           draftText = draftText.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
         }
       } else {
+        draftSource = 'template';
         const name = customerName && customerName.toLowerCase() !== 'there' ? customerName : 'there';
         if (lowerThread.includes('refund') || lowerThread.includes('return') || lowerThread.includes('money back')) {
           draftText = `Hi ${name},\n\nThank you for reaching out to us. I completely understand and would be glad to help you with your return and refund request.\n\nI have located your account and initiated the refund process in accordance with our return policy. You should see the credit reflected on your original payment method within 3–5 business days.\n\nPlease don't hesitate to reach out if you have any questions in the meantime!\n\nBest regards,\nCustomer Support Team`;
@@ -799,6 +876,7 @@ export class ApiClient {
       draft: draftText,
       macroUsed: matchedMacro?.name || null,
       confidence: matchedMacro ? 96 : 88,
+      source: draftSource,
     };
   }
 

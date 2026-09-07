@@ -10,7 +10,7 @@ function extractSenderName(text: string): string {
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Z][a-z]+)/i);
+  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
@@ -25,11 +25,45 @@ function extractSenderName(text: string): string {
     }
   }
   if (signMatch && signMatch[1]) {
-    return signMatch[1].trim();
+    const clean = signMatch[1].trim();
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
+    if (!blacklist.includes(clean.toLowerCase())) {
+      return clean;
+    }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = ['there', 'team', 'support', 'all', 'everyone', 'sir', 'madam', 'can', 'could', 'would', 'please'];
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
     if (!blacklist.includes(candidate.toLowerCase())) {
       return candidate;
     }

@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/admin-auth';
 import { scrubPII } from '@/lib/pii-scrubber';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 function cleanAiDraft(rawText: string, customerName = 'there'): string {
   if (!rawText) return '';
@@ -54,9 +55,16 @@ function cleanAiDraft(rawText: string, customerName = 'there'): string {
   while (prevText !== text) {
     prevText = text;
     text = text
-      .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|Subject:[^\n]*|Email:?|Suggested Reply:?)\s*\n+/i, '')
+      .replace(
+        /^(?:\*\*)?(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|(?:Subject|Re):\s*[^\n]*|Email:?|Suggested Reply:?)(?:\*\*)?\s*\n+/i,
+        ''
+      )
       .trim();
   }
+
+  // 5b. Strip trailing tip/note postscripts
+  text = text.replace(/\n+---\s*\n+\*?(?:Tip|Note):?[\s\S]*$/i, '').trim();
+  text = text.replace(/\n+\*(?:Tip|Note):?[\s\S]*$/i, '').trim();
 
   // 6. Template Variable Normalization
   text = text
@@ -75,6 +83,8 @@ function cleanAiDraft(rawText: string, customerName = 'there'): string {
     .replace(/\[Representative Name\]/gi, defaultSignoff)
     .replace(/\[Your Title\]/gi, defaultSignoff)
     .replace(/\[Company Name\]/gi, 'DraftPilot Support')
+    .replace(/\[Company\]/gi, 'DraftPilot Support')
+    .replace(/\[Contact Information\]/gi, 'support@draftpilot.com')
     .replace(/\[Support Team\]/gi, defaultSignoff)
     .replace(/{{agent_name}}/gi, defaultSignoff);
 
@@ -94,7 +104,7 @@ function extractSenderName(text: string): string {
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Z][a-z]+)/i);
+  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
@@ -109,11 +119,45 @@ function extractSenderName(text: string): string {
     }
   }
   if (signMatch && signMatch[1]) {
-    return signMatch[1].trim();
+    const clean = signMatch[1].trim();
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
+    if (!blacklist.includes(clean.toLowerCase())) {
+      return clean;
+    }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = ['there', 'team', 'support', 'all', 'everyone', 'sir', 'madam', 'can', 'could', 'would', 'please'];
+    const blacklist = [
+      'there',
+      'team',
+      'support',
+      'all',
+      'everyone',
+      'sir',
+      'madam',
+      'sir/madam',
+      'concern',
+      'customer',
+      'can',
+      'could',
+      'would',
+      'please',
+    ];
     if (!blacklist.includes(candidate.toLowerCase())) {
       return candidate;
     }
@@ -328,10 +372,18 @@ CRITICAL INSTRUCTIONS:
 3. Start directly with "Hi ${customerName}," and end with "Best regards,\\nCustomer Support Team".
 4. Do NOT wrap in markdown code blocks.`;
 
-    if (settings && settings.openrouter_api_key) {
+    const openrouterApiKey =
+      settings?.openrouter_api_key?.trim() ||
+      process.env.OPENROUTER_API_KEY?.trim() ||
+      process.env.NEXT_PUBLIC_OPENROUTER_API_KEY?.trim() ||
+      '';
+
+    if (openrouterApiKey) {
       try {
-        const activeModel = settings.selected_model || settings.openrouter_model || 'google/gemma-4-26b-a4b-it:free';
-        const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+        const activeModel = settings?.selected_model || settings?.openrouter_model || 'z-ai/glm-5.3-flash';
+        const fallbackModel = activeModel.includes('26b')
+          ? 'google/gemma-4-31b-it:free'
+          : (activeModel === 'z-ai/glm-5.3-flash' ? 'z-ai/glm-5.2:free' : 'google/gemma-4-26b-a4b-it:free');
 
         let knowledgeContext = '';
         if (matchedMacro?.content) {
@@ -409,81 +461,62 @@ CRITICAL INSTRUCTIONS:
         const userPrompt = `Customer Message:\n${scrubbedThreadContent}\n\n${knowledgeContext}${agentGuidanceContext}Write the clean, direct customer email reply now:`;
 
         const isReasoningMandatory = (model: string) =>
-          model.includes('glm-5.3') || model.includes('o1') || model.includes('o3');
+          model.includes('o1') || model.includes('o3');
 
-        const primaryBody: any = {
-          model: activeModel,
-          messages: [
-            { role: 'system', content: strictSystemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-          max_tokens: Math.max(1000, Number(settings.max_tokens) || 1000),
-          temperature: parseFloat(settings.temperature as string) || 0.4,
-        };
-        if (!isReasoningMandatory(activeModel)) {
-          primaryBody.include_reasoning = false;
-          primaryBody.reasoning = { max_tokens: 0 };
-        }
+        // Candidate models to try in sequence
+        const candidateModels: string[] = [];
+        if (activeModel) candidateModels.push(activeModel);
+        if (fallbackModel && !candidateModels.includes(fallbackModel)) candidateModels.push(fallbackModel);
+        if (!candidateModels.includes('z-ai/glm-5.3-flash')) candidateModels.push('z-ai/glm-5.3-flash');
+        if (!candidateModels.includes('z-ai/glm-5.2:free')) candidateModels.push('z-ai/glm-5.2:free');
 
-        // 1. Try Primary Model (with dynamic timeout based on model type)
-        const primaryTimeoutMs = isReasoningMandatory(activeModel) ? 20000 : 8000;
-        let openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${settings.openrouter_api_key}`,
-            'HTTP-Referer': 'https://draftpilot-web.vercel.app',
-            'X-Title': 'DraftPilot',
-          },
-          body: JSON.stringify(primaryBody),
-          signal: AbortSignal.timeout(primaryTimeoutMs),
-        });
+        for (const modelToTry of candidateModels) {
+          try {
+            const body: any = {
+              model: modelToTry,
+              messages: [
+                { role: 'system', content: strictSystemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              max_tokens: Math.max(1000, Number(settings?.max_tokens) || 1000),
+              temperature: parseFloat(settings?.temperature as string) || 0.4,
+            };
+            if (!isReasoningMandatory(modelToTry)) {
+              body.include_reasoning = false;
+              body.reasoning = { max_tokens: 0 };
+            }
 
-        let openRouterData = await openrouterRes.json().catch(() => null);
+            const timeoutMs = isReasoningMandatory(modelToTry) ? 20000 : 10000;
+            const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${openrouterApiKey}`,
+                'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+                'X-Title': 'DraftPilot',
+              },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
 
-        // 2. If Primary fails, attempt Automatic Fallback Model
-        if ((!openrouterRes.ok || !openRouterData?.choices?.[0]) && fallbackModel !== activeModel) {
-          console.warn(`Primary model ${activeModel} failed (${openrouterRes.status}). Attempting auto-fallback to ${fallbackModel}...`);
-          const fallbackBody: any = {
-            model: fallbackModel,
-            messages: [
-              { role: 'system', content: strictSystemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-            max_tokens: Math.max(1000, Number(settings.max_tokens) || 1000),
-            temperature: parseFloat(settings.temperature as string) || 0.4,
-          };
-          if (!isReasoningMandatory(fallbackModel)) {
-            fallbackBody.include_reasoning = false;
-            fallbackBody.reasoning = { max_tokens: 0 };
-          }
+            const openRouterData = await openrouterRes.json().catch(() => null);
 
-          const fallbackTimeoutMs = isReasoningMandatory(fallbackModel) ? 20000 : 8000;
-          const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${settings.openrouter_api_key}`,
-              'HTTP-Referer': 'https://draftpilot-web.vercel.app',
-              'X-Title': 'DraftPilot',
-            },
-            body: JSON.stringify(fallbackBody),
-            signal: AbortSignal.timeout(fallbackTimeoutMs),
-          });
-
-          const fallbackData = await fallbackRes.json().catch(() => null);
-          if (fallbackRes.ok && fallbackData?.choices?.[0]) {
-            openrouterRes = fallbackRes;
-            openRouterData = fallbackData;
-          }
-        }
-
-        if (openRouterData?.choices && openRouterData.choices.length > 0) {
-          const rawContent = openRouterData.choices[0].message?.content || '';
-          const cleaned = cleanAiDraft(rawContent, customerName);
-          if (cleaned && cleaned.length > 15) {
-            draftText = cleaned;
-            openRouterSuccess = true;
+            if (openrouterRes.ok && openRouterData?.choices && openRouterData.choices.length > 0) {
+              const rawContent = openRouterData.choices[0].message?.content || '';
+              const cleaned = cleanAiDraft(rawContent, customerName);
+              if (cleaned && cleaned.length > 15) {
+                draftText = cleaned;
+                openRouterSuccess = true;
+                break;
+              }
+            } else {
+              console.warn(
+                `Model ${modelToTry} attempt failed (${openrouterRes.status}):`,
+                openRouterData?.error || openrouterRes.statusText
+              );
+            }
+          } catch (modelErr) {
+            console.warn(`Model ${modelToTry} error:`, modelErr);
           }
         }
       } catch (aiErr) {
@@ -566,10 +599,18 @@ CRITICAL INSTRUCTIONS:
       }
     }
 
+    const draftSource = openRouterSuccess
+      ? 'openrouter'
+      : (matchedMacro?.content ? 'macro' : 'template');
+
     return NextResponse.json({
       draft: scrubbedDraftText,
       macroUsed: matchedMacro?.name || null,
-      confidence: matchedMacro ? 96 : 88,
+      confidence: matchedMacro ? 96 : (openRouterSuccess ? 92 : 88),
+      source: draftSource,
+      ...(!openRouterSuccess && !openrouterApiKey
+        ? { notice: 'No OpenRouter API key configured in Platform Settings. Generated using fallback template.' }
+        : {}),
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
