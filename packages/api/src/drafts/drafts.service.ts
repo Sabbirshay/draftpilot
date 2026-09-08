@@ -35,6 +35,19 @@ const SALUTATION_BLACKLIST = [
   'info',
   'admin',
   'administrator',
+  'greetings',
+  'morning',
+  'afternoon',
+  'evening',
+  'folks',
+  'colleague',
+  'colleagues',
+  'i',
+  'we',
+  'my',
+  'our',
+  'thank',
+  'just',
 ];
 
 function extractSenderName(text: string): string {
@@ -43,7 +56,7 @@ function extractSenderName(text: string): string {
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
   const greetMatch = text.match(
-    /(?:hi|dear|hello),?\s+(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
+    /(?:hi|dear|hello|good\s+(?:morning|afternoon|evening|day)|greetings),?[^\S\r\n]+(?:(?:mr|mrs|ms|miss|dr|prof)\.?[^\S\r\n]+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
   );
 
   if (fromMatch && fromMatch[1].trim()) {

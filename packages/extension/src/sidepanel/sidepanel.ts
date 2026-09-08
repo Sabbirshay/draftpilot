@@ -162,17 +162,17 @@ class SidePanel {
         const badgeEl = document.getElementById('draft-macro-badge');
         if (badgeEl) {
           if (result.source === 'openrouter' || result.source === 'ai') {
-            badgeEl.innerText = 'AI Generated';
+            badgeEl.innerText = '✨ AI Generated';
             badgeEl.style.background = 'rgba(124, 58, 237, 0.2)';
             badgeEl.style.color = '#a78bfa';
             badgeEl.title = 'Authentic AI generated output via OpenRouter LLM';
           } else if (result.source === 'macro') {
-            badgeEl.innerText = result.macroUsed ? `Macro: ${result.macroUsed}` : 'Quick Reply';
+            badgeEl.innerText = result.macroUsed ? `📐 Macro: ${result.macroUsed}` : '📐 Macro';
             badgeEl.style.background = 'rgba(59, 130, 246, 0.2)';
             badgeEl.style.color = '#60a5fa';
             badgeEl.title = result.macroUsed ? `Grounded support macro: ${result.macroUsed}` : 'Quick reply macro';
           } else {
-            badgeEl.innerText = 'Template Reply';
+            badgeEl.innerText = '📄 Template Reply';
             badgeEl.style.background = 'rgba(234, 179, 8, 0.2)';
             badgeEl.style.color = '#fbbf24';
             badgeEl.title = (result as any).notice || 'Grounded fallback template (not AI generated)';

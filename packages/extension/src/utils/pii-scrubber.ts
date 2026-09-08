@@ -16,10 +16,64 @@ export interface CustomPiiRule {
   created_at?: string;
 }
 
-export function scrubPII(text: string, customRules?: CustomPiiRule[]): string {
+export interface PiiScrubberOptions {
+  customRules?: CustomPiiRule[];
+  whitelist?: string[];
+  extraWhitelist?: string[];
+}
+
+export const DEFAULT_PII_WHITELIST = [
+  'support@draftpilot.com',
+  'help@draftpilot.com',
+  'contact@draftpilot.com',
+  'info@draftpilot.com',
+];
+
+export function scrubPII(
+  text: string,
+  customRulesOrOptions?: CustomPiiRule[] | PiiScrubberOptions,
+  extraWhitelist: string[] = []
+): string {
   if (!text) return '';
 
   let scrubbed = text;
+  let customRules: CustomPiiRule[] | undefined;
+  const whitelistSet = new Set<string>(DEFAULT_PII_WHITELIST.map((s) => s.toLowerCase()));
+
+  if (Array.isArray(customRulesOrOptions)) {
+    customRules = customRulesOrOptions;
+  } else if (customRulesOrOptions && typeof customRulesOrOptions === 'object') {
+    customRules = customRulesOrOptions.customRules;
+    if (Array.isArray(customRulesOrOptions.whitelist)) {
+      customRulesOrOptions.whitelist.forEach((item) => {
+        if (item && typeof item === 'string') whitelistSet.add(item.trim().toLowerCase());
+      });
+    }
+    if (Array.isArray(customRulesOrOptions.extraWhitelist)) {
+      customRulesOrOptions.extraWhitelist.forEach((item) => {
+        if (item && typeof item === 'string') whitelistSet.add(item.trim().toLowerCase());
+      });
+    }
+  }
+
+  if (Array.isArray(extraWhitelist)) {
+    extraWhitelist.forEach((item) => {
+      if (item && typeof item === 'string') whitelistSet.add(item.trim().toLowerCase());
+    });
+  }
+
+  const whitelistedPhoneDigits = new Set<string>();
+  const whitelistedEmails = new Set<string>();
+  whitelistSet.forEach((item) => {
+    if (item.includes('@')) {
+      whitelistedEmails.add(item);
+    } else {
+      const digits = item.replace(/\D/g, '');
+      if (digits.length >= 7) {
+        whitelistedPhoneDigits.add(digits);
+      }
+    }
+  });
 
   // 1. Evaluate Custom User/Workspace Rules First (with ReDoS safeguards)
   if (customRules && Array.isArray(customRules)) {
@@ -61,10 +115,25 @@ export function scrubPII(text: string, customRules?: CustomPiiRule[]): string {
   }
 
   // 2. Built-in Rule: Credit Card Numbers (13-19 digits with optional hyphens/spaces)
-  scrubbed = scrubbed.replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_REDACTED]');
+  scrubbed = scrubbed.replace(/\b(?:\d[ -]*?){13,19}\b/g, (match) => {
+    const digits = match.replace(/\D/g, '');
+    if (whitelistedPhoneDigits.has(digits) || whitelistSet.has(match.trim().toLowerCase())) {
+      return match;
+    }
+    return '[CARD_REDACTED]';
+  });
 
-  // 3. Built-in Rule: Email addresses
-  scrubbed = scrubbed.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[EMAIL_REDACTED]');
+  // 3. Built-in Rule: Email addresses (preserving whitelisted company emails)
+  scrubbed = scrubbed.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, (match) => {
+    const lower = match.toLowerCase();
+    if (
+      whitelistedEmails.has(lower) ||
+      whitelistSet.has(lower)
+    ) {
+      return match;
+    }
+    return '[EMAIL_REDACTED]';
+  });
 
   // 4. Built-in Rule: API Keys, JWTs & Auth Tokens (Bearer, JWT, sk-, ghp_, AKIA, api_key, etc.)
   scrubbed = scrubbed.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[TOKEN_REDACTED]');
@@ -82,11 +151,16 @@ export function scrubPII(text: string, customRules?: CustomPiiRule[]): string {
   // 7. Built-in Rule: IP Addresses (IPv4)
   scrubbed = scrubbed.replace(/\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g, '[IP_REDACTED]');
 
-  // 8. Built-in Rule: Phone numbers (US, UK, International formats, with/without country codes)
+  // 8. Built-in Rule: Phone numbers (preserving whitelisted helplines)
   scrubbed = scrubbed.replace(/(?:\b|\+)(?:\d{1,4}[-.\s]?)?(?:\(?\d{2,5}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b/g, (match) => {
-    // Only redact if string contains at least 7 digits to prevent redacting single short numbers
     const digits = match.replace(/\D/g, '');
-    return digits.length >= 7 && digits.length <= 15 ? '[PHONE_REDACTED]' : match;
+    if (digits.length < 7 || digits.length > 15) {
+      return match;
+    }
+    if (whitelistedPhoneDigits.has(digits) || whitelistSet.has(match.trim().toLowerCase())) {
+      return match;
+    }
+    return '[PHONE_REDACTED]';
   });
 
   // 9. Built-in Rule: Street Addresses & P.O. Boxes

@@ -45,6 +45,18 @@ function generateSmartSupportReply(inquiry: string, customerName = 'there'): str
     return `Hi ${customerName},\n\nThank you for reporting this issue to our technical support team.\n\nI apologize for any disruption this has caused. We have logged the error details and our engineering team is actively investigating the behavior.\n\nIn the meantime, could you please try clearing your browser cache or testing in an incognito window? If the problem persists, replying with a quick screenshot or console log will help us resolve it even faster.\n\nBest regards,\nTechnical Support Team`;
   }
 
+  // 6. Partnership / Affiliates / Collaboration Intent
+  if (
+    lower.includes('partner') ||
+    lower.includes('collab') ||
+    lower.includes('affiliate') ||
+    lower.includes('sponsor') ||
+    lower.includes('press') ||
+    lower.includes('media')
+  ) {
+    return `Hi ${customerName},\n\nThank you for your interest in partnering with us! We are always excited to explore meaningful synergies and collaborations.\n\nI have forwarded your inquiry to our partnerships and strategic outreach team. A partnership manager will review your proposal and follow up with you directly within 1-2 business days.\n\nBest regards,\nPartnership & Growth Team`;
+  }
+
   // Default General Inquiry Response
   return `Hi ${customerName},\n\nThank you for contacting DraftPilot support! I have received your inquiry and would be glad to help.\n\nCould you please provide a few additional details regarding your request so I can ensure this is handled as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
 }
@@ -99,6 +111,33 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
   const [isTesting, setIsTesting] = useState(false);
   const [testMetrics, setTestMetrics] = useState({ tokens: 0, latency: 0 });
   const [rateLimitWarning, setRateLimitWarning] = useState<UpstreamErrorWarning | null>(null);
+
+  // Helper for telemetry auto-hydration & key verification
+  const fetchKeyTelemetry = async (key: string) => {
+    const trimmed = key.trim();
+    if (!trimmed || !trimmed.startsWith('sk-or-')) return null;
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.data) {
+        setKeyStatus('valid');
+        setKeyTelemetry({
+          label: json.data.label || null,
+          usage: Number(json.data.usage) || 0,
+          limit: json.data.limit !== undefined && json.data.limit !== null ? Number(json.data.limit) : null,
+          is_free_tier: Boolean(json.data.is_free_tier),
+          rate_limit: json.data.rate_limit,
+        });
+        return json.data;
+      }
+      return null;
+    } catch (e) {
+      console.warn('Telemetry fetch error:', e);
+      return null;
+    }
+  };
 
   // 1. Initial Load: Immediate LocalStorage cache + Supabase cloud synchronization
   useEffect(() => {
@@ -163,6 +202,9 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
           if (data.openrouter_api_key) {
             setOpenrouterKey(data.openrouter_api_key);
             setKeyStatus('valid');
+            if (data.openrouter_api_key.trim().startsWith('sk-or-')) {
+              fetchKeyTelemetry(data.openrouter_api_key);
+            }
           }
           if (data.openrouter_model) {
             setOpenrouterModel(data.openrouter_model);
@@ -214,31 +256,14 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
         return;
       }
       setKeyStatus('testing');
-      try {
-        const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
-          headers: { Authorization: `Bearer ${trimmed}` },
-        });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.data) {
-          setKeyStatus('valid');
-          setKeyTelemetry({
-            label: json.data.label || null,
-            usage: Number(json.data.usage) || 0,
-            limit: json.data.limit !== undefined && json.data.limit !== null ? Number(json.data.limit) : null,
-            is_free_tier: Boolean(json.data.is_free_tier),
-            rate_limit: json.data.rate_limit,
-          });
-          const label = json.data.label ? ` (${json.data.label})` : '';
-          setKeyVerifyMessage(`Verified & Active${label}`);
-        } else {
-          setKeyStatus('invalid');
-          setKeyTelemetry(null);
-          setKeyVerifyMessage(json?.error?.message || 'Invalid OpenRouter Key');
-        }
-      } catch (err: any) {
+      const telemetry = await fetchKeyTelemetry(trimmed);
+      if (telemetry) {
+        const label = telemetry.label ? ` (${telemetry.label})` : '';
+        setKeyVerifyMessage(`Verified & Active${label}`);
+      } else {
         setKeyStatus('invalid');
         setKeyTelemetry(null);
-        setKeyVerifyMessage('Network error connecting to OpenRouter');
+        setKeyVerifyMessage('Invalid OpenRouter Key or network error');
       }
     } else if (provider === 'openai') {
       const trimmed = openaiKey.trim();
@@ -340,52 +365,76 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
   };
 
   const handleTestDraft = async () => {
-    if (provider !== 'openrouter') {
-      alert('Playground currently supports live OpenRouter testing directly from your browser.');
-      return;
-    }
-    if (!openrouterKey.trim()) {
-      alert('Please enter your OpenRouter API Key first.');
-      return;
-    }
-
     setIsTesting(true);
     setTestResponse(null);
+    setRateLimitWarning(null);
     const start = Date.now();
 
+    const activeModel = customOpenrouterModel.trim() || openrouterModel || 'google/gemma-4-26b-a4b-it:free';
+    const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+
+    // Step 1: Call unified server endpoint /api/drafts/generate with admin authentication & isTest: true
     try {
-      const activeModel = customOpenrouterModel.trim() || openrouterModel || 'google/gemma-4-26b-a4b-it:free';
-      const fallbackModel = activeModel.includes('26b') ? 'google/gemma-4-31b-it:free' : 'google/gemma-4-26b-a4b-it:free';
+      const adminPasskey = typeof window !== 'undefined' ? sessionStorage.getItem('draftpilot_admin_passkey') : null;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
-      let usedModel = activeModel;
-      let isFallback = false;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (adminPasskey) {
+        headers['x-admin-passkey'] = adminPasskey;
+      }
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
-      // 1. Try Primary Model
-      let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const res = await fetch('/api/drafts/generate', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${openrouterKey.trim()}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://draftpilot-web.vercel.app',
-          'X-Title': 'DraftPilot Admin Playground',
-        },
+        headers,
         body: JSON.stringify({
-          model: activeModel,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: testThread },
-          ],
+          threadContent: testThread,
+          thread: testThread,
+          selected_model: activeModel,
           temperature: temperature,
-          max_tokens: activeModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
+          max_tokens: maxTokens,
+          systemPrompt: systemPrompt,
+          isTest: true,
         }),
       });
 
-      let data = await response.json().catch(() => null);
+      if (res.ok) {
+        const result = await res.json();
+        const latency = (Date.now() - start) / 1000;
+        setRateLimitWarning(null);
+        const isFallback = result.isFallback || result.source !== 'openrouter';
+        const usedModel = result.modelUsed || result.model || fallbackModel;
+        const prefix = isFallback
+          ? `[⚡ Auto-Fallback Active (${result.source || 'fallback'}): Generated with ${usedModel}]\n\n`
+          : '';
+        setTestResponse(prefix + (result.draft || ''));
+        setTestMetrics({
+          tokens: result.tokens || result.usage?.total_tokens || 150,
+          latency,
+        });
+        setIsTesting(false);
+        return;
+      } else {
+        const errJson = await res.json().catch(() => null);
+        console.warn('Backend /api/drafts/generate returned non-200, attempting client-side fallback:', res.status, errJson);
+      }
+    } catch (backendErr) {
+      console.warn('Backend /api/drafts/generate network error, attempting client-side fallback:', backendErr);
+    }
 
-      // 2. If Primary Model fails (e.g. rate limit, 429, 500), automatically attempt Fallback Model
-      if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
-        console.warn(`Primary model ${activeModel} returned ${response.status}. Attempting auto-fallback to ${fallbackModel}...`);
-        const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    // Step 2: Direct browser OpenRouter fallback if API key is present in client UI
+    if (provider === 'openrouter' && openrouterKey.trim()) {
+      try {
+        let usedModel = activeModel;
+        let isFallback = false;
+
+        // Try Primary Model
+        let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${openrouterKey.trim()}`,
@@ -394,140 +443,165 @@ Generate a calm, polite, and concise reply based strictly on the provided thread
             'X-Title': 'DraftPilot Admin Playground',
           },
           body: JSON.stringify({
-            model: fallbackModel,
+            model: activeModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: testThread },
             ],
             temperature: temperature,
-            max_tokens: fallbackModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
+            max_tokens: activeModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
           }),
         });
 
-        const fallbackData = await fallbackRes.json().catch(() => null);
-        if (fallbackRes.ok && fallbackData?.choices?.[0]) {
-          response = fallbackRes;
-          data = fallbackData;
-          usedModel = fallbackModel;
-          isFallback = true;
-        }
-      }
+        let data = await response.json().catch(() => null);
 
-      const latency = (Date.now() - start) / 1000;
+        // Auto-fallback model on error
+        if ((!response.ok || !data?.choices?.[0]) && fallbackModel !== activeModel) {
+          console.warn(`Primary model ${activeModel} returned ${response.status}. Attempting auto-fallback to ${fallbackModel}...`);
+          const fallbackRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${openrouterKey.trim()}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://draftpilot-web.vercel.app',
+              'X-Title': 'DraftPilot Admin Playground',
+            },
+            body: JSON.stringify({
+              model: fallbackModel,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: testThread },
+              ],
+              temperature: temperature,
+              max_tokens: fallbackModel.includes('glm-5.3') ? Math.max(800, maxTokens) : maxTokens,
+            }),
+          });
 
-      if (data?.choices && data.choices[0]) {
-        setRateLimitWarning(null);
-        const rawContent = data.choices[0].message.content || '';
-        let cleaned = rawContent.trim();
-        
-        // 1. Remove XML/HTML style <think>...</think> reasoning blocks
-        cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-        // 2. Multi-paragraph reasoning / thinking process removal (DeepSeek R1 / Gemma 4 / Qwen)
-        if (
-          /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
-            cleaned
-          )
-        ) {
-          const emailMatch = cleaned.match(
-            /(?:^|\n\s*\n|\n)(?:> )?(Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good morning\b|Good afternoon\b|Greetings\b)([\s\S]+)$/i
-          );
-          if (emailMatch) {
-            cleaned = (emailMatch[1] + emailMatch[2]).trim();
-          } else {
-            const splitMatch = cleaned.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
-            if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
-              cleaned = splitMatch[1].trim();
-            }
+          const fallbackData = await fallbackRes.json().catch(() => null);
+          if (fallbackRes.ok && fallbackData?.choices?.[0]) {
+            response = fallbackRes;
+            data = fallbackData;
+            usedModel = fallbackModel;
+            isFallback = true;
           }
         }
 
-        // 3. Fallback check for residual thinking analysis fragments
-        if (
-          /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(cleaned) ||
-          cleaned.startsWith('1.  **Analyze') ||
-          cleaned.startsWith('1. **Analyze')
-        ) {
-          cleaned = '';
-        }
+        const latency = (Date.now() - start) / 1000;
 
-        // 4. Code block removal (handles preambles and postscripts around code fences)
-        const codeBlockMatch = cleaned.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
-        if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
-          cleaned = codeBlockMatch[1].trim();
+        if (data?.choices && data.choices[0]) {
+          setRateLimitWarning(null);
+          const rawContent = data.choices[0].message.content || '';
+          let cleaned = rawContent.trim();
+          
+          // 1. Remove XML/HTML style <think>...</think> reasoning blocks (including unclosed)
+          cleaned = cleaned.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
+
+          // 2. Multi-paragraph reasoning / thinking process removal
+          if (
+            /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\*\*Thinking Process:\*\*|\*\*Reasoning:\*\*|\d+\.\s*\*\*Analyze User Input)/i.test(
+              cleaned
+            )
+          ) {
+            const emailMatch = cleaned.match(
+              /(?:^|\n\s*\n|\n)(?:> )?(Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good morning\b|Good afternoon\b|Greetings\b)([\s\S]+)$/i
+            );
+            if (emailMatch) {
+              cleaned = (emailMatch[1] + emailMatch[2]).trim();
+            } else {
+              const splitMatch = cleaned.split(/\*\*(?:Final Response|Reply|Draft|Email):\*\*/i);
+              if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
+                cleaned = splitMatch[1].trim();
+              }
+            }
+          }
+
+          // 3. Fallback check for residual thinking analysis fragments
+          if (
+            /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(cleaned) ||
+            cleaned.startsWith('1.  **Analyze') ||
+            cleaned.startsWith('1. **Analyze')
+          ) {
+            cleaned = '';
+          }
+
+          // 4. Code block removal
+          const codeBlockMatch = cleaned.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
+          if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
+            cleaned = codeBlockMatch[1].trim();
+          } else {
+            cleaned = cleaned.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+          }
+
+          // 5. Remove Meta Headers & Label Lines
+          cleaned = cleaned
+            .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?|Suggested Reply:?)\s*\n+/i, '')
+            .trim();
+
+          // 6. Template Variable & Sign-off Placeholder Scrubbing
+          cleaned = cleaned
+            .replace(/{{name}}/gi, 'there')
+            .replace(/{{customer_name}}/gi, 'there')
+            .replace(/\[Customer(?:\s*Name)?\]/gi, 'there')
+            .replace(/\[Name\]/gi, 'there')
+            .replace(/\[Client(?:\s*Name)?\]/gi, 'there')
+            .replace(/\[Your Name\]/gi, 'Support Team')
+            .replace(/\[Agent Name\]/gi, 'Support Team')
+            .replace(/\[Representative Name\]/gi, 'Support Team')
+            .replace(/\[Company Name\]/gi, 'DraftPilot Support')
+            .replace(/\[Support Team\]/gi, 'Support Team')
+            .replace(/{{agent_name}}/gi, 'Support Team');
+
+          const prefix = isFallback ? `[⚡ Auto-Fallback Active: Generated with ${usedModel}]\n\n` : '';
+          setTestResponse(prefix + (cleaned || rawContent));
+          setTestMetrics({
+            tokens: data.usage?.total_tokens || 0,
+            latency: latency,
+          });
+          setIsTesting(false);
+          return;
         } else {
-          cleaned = cleaned.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+          const rawErrMsg = data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || '';
+          const status = response.status;
+          
+          let category: 'daily_cap' | 'rate_limit' | 'congestion' | 'credits_exhausted' | 'auth_error' | 'general' = 'general';
+          const lower = rawErrMsg.toLowerCase();
+
+          if (status === 401 || lower.includes('unauthorized') || lower.includes('invalid api key')) {
+            category = 'auth_error';
+          } else if (status === 402 || lower.includes('insufficient') || lower.includes('balance') || lower.includes('out of credits')) {
+            category = 'credits_exhausted';
+          } else if (lower.includes('free model') || lower.includes('50 requests') || lower.includes('daily') || (status === 429 && lower.includes('credit'))) {
+            category = 'daily_cap';
+          } else if (status === 429 || lower.includes('rate limit')) {
+            category = 'rate_limit';
+          } else if (status === 503 || status === 529 || lower.includes('queue') || lower.includes('busy') || lower.includes('overloaded') || lower.includes('temporarily unavailable')) {
+            category = 'congestion';
+          }
+
+          setRateLimitWarning({
+            category,
+            verbatimMessage: rawErrMsg || `HTTP ${status}: ${response.statusText || 'Upstream service error'}`,
+            statusCode: status,
+          });
         }
-
-        // 5. Remove Meta Headers & Label Lines
-        cleaned = cleaned
-          .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Response:?|Email:?|Suggested Reply:?)\s*\n+/i, '')
-          .trim();
-
-        // 6. Template Variable & Sign-off Placeholder Scrubbing
-        cleaned = cleaned
-          .replace(/{{name}}/gi, 'there')
-          .replace(/{{customer_name}}/gi, 'there')
-          .replace(/\[Customer(?:\s*Name)?\]/gi, 'there')
-          .replace(/\[Name\]/gi, 'there')
-          .replace(/\[Client(?:\s*Name)?\]/gi, 'there')
-          .replace(/\[Your Name\]/gi, 'Support Team')
-          .replace(/\[Agent Name\]/gi, 'Support Team')
-          .replace(/\[Representative Name\]/gi, 'Support Team')
-          .replace(/\[Company Name\]/gi, 'DraftPilot Support')
-          .replace(/\[Support Team\]/gi, 'Support Team')
-          .replace(/{{agent_name}}/gi, 'Support Team');
-
-        const prefix = isFallback ? `[⚡ Auto-Fallback Active: Generated with ${usedModel}]\n\n` : '';
-        setTestResponse(prefix + (cleaned || rawContent));
-        setTestMetrics({
-          tokens: data.usage?.total_tokens || 0,
-          latency: latency,
-        });
-      } else {
-        const rawErrMsg = data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || '';
-        const status = response.status;
-        
-        let category: 'daily_cap' | 'rate_limit' | 'congestion' | 'credits_exhausted' | 'auth_error' | 'general' = 'general';
-        const lower = rawErrMsg.toLowerCase();
-
-        if (status === 401 || lower.includes('unauthorized') || lower.includes('invalid api key')) {
-          category = 'auth_error';
-        } else if (status === 402 || lower.includes('insufficient') || lower.includes('balance') || lower.includes('out of credits')) {
-          category = 'credits_exhausted';
-        } else if (lower.includes('free model') || lower.includes('50 requests') || lower.includes('daily') || (status === 429 && lower.includes('credit'))) {
-          category = 'daily_cap';
-        } else if (status === 429 || lower.includes('rate limit')) {
-          category = 'rate_limit';
-        } else if (status === 503 || status === 529 || lower.includes('queue') || lower.includes('busy') || lower.includes('overloaded') || lower.includes('temporarily unavailable')) {
-          category = 'congestion';
-        }
-
+      } catch (err: any) {
         setRateLimitWarning({
-          category,
-          verbatimMessage: rawErrMsg || `HTTP ${status}: ${response.statusText || 'Upstream service error'}`,
-          statusCode: status,
-        });
-
-        const smartReply = generateSmartSupportReply(testThread);
-        setTestResponse(smartReply);
-        setTestMetrics({
-          tokens: 135,
-          latency: latency,
+          category: 'general',
+          verbatimMessage: err.message || 'Network exception connecting to OpenRouter',
+          statusCode: 0,
         });
       }
-    } catch (err: any) {
-      setRateLimitWarning({
-        category: 'general',
-        verbatimMessage: err.message || 'Network exception connecting to OpenRouter',
-        statusCode: 0,
-      });
-      const smartReply = generateSmartSupportReply(testThread);
-      setTestResponse(smartReply);
-      setTestMetrics({ tokens: 135, latency: 0.1 });
-    } finally {
-      setIsTesting(false);
     }
+
+    // Step 3: Grounded Local Synthesizer Fallback
+    const latency = (Date.now() - start) / 1000;
+    const smartReply = generateSmartSupportReply(testThread);
+    setTestResponse(smartReply);
+    setTestMetrics({
+      tokens: 135,
+      latency: latency || 0.1,
+    });
+    setIsTesting(false);
   };
 
   return (

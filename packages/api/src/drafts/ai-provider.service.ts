@@ -70,7 +70,8 @@ CRITICAL INSTRUCTIONS:
 1. Output ONLY the raw final email reply text ready to send.
 2. Absolutely DO NOT output any thinking process, analysis, reasoning steps, or markdown bullets.
 3. Start directly with "Hi ${customerName}," and end with "Best regards,\\nCustomer Support Team".
-4. Do NOT wrap in markdown code blocks.`;
+4. Do NOT wrap in markdown code blocks.
+5. If "Agent Guidance / Custom Instruction" is provided, it represents direct human supervisor guidance that takes highest priority and MUST be reflected in the reply, overriding default policies or standard templates when in conflict.`;
 
     this.logger.log(`Using AI Provider: ${provider}`);
 
@@ -190,12 +191,12 @@ CRITICAL INSTRUCTIONS:
     if (!rawText) return '';
     let text = rawText.trim();
 
-    // 1. Remove XML/HTML style <think>...</think> tags (e.g. DeepSeek / Nemotron / Qwen reasoning)
-    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    // 1. Remove XML/HTML style <think> tags (handles both closed <think>...</think> and unclosed truncated <think>...)
+    text = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
 
     // 2. Strip Reasoning Chains & Thinking Process Headers (DeepSeek R1 / Gemma 4 / Qwen)
     if (
-      /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
+      /^(?:(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is) (?:a |the )?)?(?:thinking process|thought process|reasoning):?(?:\*\*)?|\d+\.\s*\*\*Analyze User Input)/i.test(
         text
       )
     ) {
@@ -205,7 +206,7 @@ CRITICAL INSTRUCTIONS:
       if (emailMatch) {
         text = (emailMatch[1] + emailMatch[2]).trim();
       } else {
-        const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email|Response):\*\*/i);
+        const splitMatch = text.split(/(?:\*\*|#{1,4}\s*)?(?:Final Response|Reply|Draft|Email|Response):?(?:\*\*)?/i);
         if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
           text = splitMatch[1].trim();
         } else {
@@ -216,7 +217,7 @@ CRITICAL INSTRUCTIONS:
 
     // 3. Double-check if the resulting text is still just a thinking process fragment
     if (
-      /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(text) ||
+      /^(?:(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is) (?:a |the )?)?(?:thinking process|thought process|reasoning)|\d+\.\s*\*\*Analyze User Input)/i.test(text) ||
       text.startsWith('1.  **Analyze') ||
       text.startsWith('1. **Analyze')
     ) {
@@ -224,11 +225,26 @@ CRITICAL INSTRUCTIONS:
     }
 
     // 4. Robust Code Fence & Wrapper Removal (handles preambles and postscripts)
-    const codeBlockMatch = text.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
-    if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
-      text = codeBlockMatch[1].trim();
+    const fullWrapperMatch = text.match(/^```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```$/i);
+    if (fullWrapperMatch) {
+      text = fullWrapperMatch[1].trim();
     } else {
-      text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+      const codeBlockMatch = text.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
+      if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
+        const prefix = text.slice(0, codeBlockMatch.index).trim();
+        const innerContent = codeBlockMatch[1].trim();
+        const prefixHasGreeting = /^(?:> )?(?:Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good\s+(?:morning|afternoon|evening)\b|Greetings\b)/im.test(prefix);
+        const innerHasGreeting = /^(?:> )?(?:Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good\s+(?:morning|afternoon|evening)\b|Greetings\b)/im.test(innerContent);
+        const prefixIsPreamble = /^(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is)|Draft|Suggested|Email|Response)\b/i.test(prefix);
+
+        if (!prefixHasGreeting && (prefixIsPreamble || innerHasGreeting)) {
+          text = innerContent;
+        } else {
+          text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+        }
+      } else {
+        text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+      }
     }
 
     // 5. Remove Meta Headers & Label Lines (handles multiple stacked headers)
@@ -236,7 +252,10 @@ CRITICAL INSTRUCTIONS:
     while (prevText !== text) {
       prevText = text;
       text = text
-        .replace(/^(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|Subject:[^\n]*|Email:?|Suggested Reply:?)\s*\n+/i, '')
+        .replace(
+          /^(?:\*\*|\*|#{1,4}\s*)?(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|(?:Subject|Re):\s*[^\n]*|Email:?|Suggested Reply:?|Thinking Process:?|Thought Process:?|Reasoning:?)(?:\*\*)?\s*\n+/i,
+          ''
+        )
         .trim();
     }
 
@@ -262,10 +281,13 @@ CRITICAL INSTRUCTIONS:
 
     // 8. Greeting Normalization
     if (customerName && customerName.toLowerCase() !== 'there') {
-      text = text.replace(/^(?:Hi|Hello|Dear)\s+there,/im, `Hi ${customerName},`);
-      text = text.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
-      text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Name\],/im, `Hi ${customerName},`);
-      text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Customer\],/im, `Hi ${customerName},`);
+      text = text.replace(
+        /^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b(?:[,\t ]+(?:(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?[A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*(?:[-'· \t][A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*)*|\[[^\]]+\]|there|customer|user|client)(?=[\t ]*[,!:]|[\r\n]|$))?[\t ]*[,!:]?/imu,
+        `Hi ${customerName},`
+      );
+    } else {
+      text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Name\],/imu, 'Hi there,');
+      text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Customer\],/imu, 'Hi there,');
     }
 
     return text;
@@ -382,7 +404,26 @@ Best regards,
 Customer Support Team`;
     }
 
-    // 6. Default Friendly Support Reply
+    // 6. Partnership / Affiliates / Collaboration
+    if (
+      lower.includes('partner') ||
+      lower.includes('collab') ||
+      lower.includes('affiliate') ||
+      lower.includes('sponsor') ||
+      lower.includes('press') ||
+      lower.includes('media')
+    ) {
+      return `Hi ${name},
+
+Thank you for your interest in partnering with us! We are always excited to explore meaningful synergies and collaborations.
+
+I have forwarded your inquiry to our partnerships and strategic outreach team. A partnership manager will review your proposal and follow up with you directly within 1-2 business days.
+
+Best regards,
+Partnership & Growth Team`;
+    }
+
+    // 7. Default Friendly Support Reply
     return `Hi ${name},
 
 Thank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.

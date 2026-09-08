@@ -12,12 +12,12 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
   if (!rawText) return '';
   let text = rawText.trim();
 
-  // 1. Remove XML/HTML style <think>...</think> tags (e.g. DeepSeek / Nemotron / Qwen reasoning)
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // 1. Remove XML/HTML style <think> tags (handles both closed <think>...</think> and unclosed truncated <think>...)
+  text = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
 
   // 2. If the response starts with "Here's a thinking process" or numbered reasoning analysis
   if (
-    /^(?:Here(?:'s| is) (?:a |the )?(?:thinking process|thought process|reasoning):?|Thinking Process:?|Thought Process:?|Reasoning:?|\d+\.\s*\*\*Analyze User Input)/i.test(
+    /^(?:(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is) (?:a |the )?)?(?:thinking process|thought process|reasoning):?(?:\*\*)?|\d+\.\s*\*\*Analyze User Input)/i.test(
       text
     )
   ) {
@@ -29,7 +29,7 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
       text = (emailMatch[1] + emailMatch[2]).trim();
     } else {
       // Look for a "**Final Response:**" or "**Draft:**" or "Reply:" marker
-      const splitMatch = text.split(/\*\*(?:Final Response|Reply|Draft|Email|Response):\*\*/i);
+      const splitMatch = text.split(/(?:\*\*|#{1,4}\s*)?(?:Final Response|Reply|Draft|Email|Response):?(?:\*\*)?/i);
       if (splitMatch.length > 1 && splitMatch[1].trim().length > 15) {
         text = splitMatch[1].trim();
       } else {
@@ -41,7 +41,7 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
 
   // 3. Double-check if the resulting text is still just a thinking process fragment
   if (
-    /^(?:Here(?:'s| is) (?:a |the )?thinking process|\d+\.\s*\*\*Analyze User Input)/i.test(text) ||
+    /^(?:(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is) (?:a |the )?)?(?:thinking process|thought process|reasoning)|\d+\.\s*\*\*Analyze User Input)/i.test(text) ||
     text.startsWith('1.  **Analyze') ||
     text.startsWith('1. **Analyze')
   ) {
@@ -49,11 +49,26 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
   }
 
   // 4. Robust Code Fence & Wrapper Removal (handles preambles and postscripts)
-  const codeBlockMatch = text.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
-  if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
-    text = codeBlockMatch[1].trim();
+  const fullWrapperMatch = text.match(/^```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```$/i);
+  if (fullWrapperMatch) {
+    text = fullWrapperMatch[1].trim();
   } else {
-    text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+    const codeBlockMatch = text.match(/```(?:markdown|text|email)?\s*\n([\s\S]*?)\n```/i);
+    if (codeBlockMatch && codeBlockMatch[1].trim().length > 10) {
+      const prefix = text.slice(0, codeBlockMatch.index).trim();
+      const innerContent = codeBlockMatch[1].trim();
+      const prefixHasGreeting = /^(?:> )?(?:Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good\s+(?:morning|afternoon|evening)\b|Greetings\b)/im.test(prefix);
+      const innerHasGreeting = /^(?:> )?(?:Hi\b|Hello\b|Dear\b|Thank you\b|Thanks\b|Good\s+(?:morning|afternoon|evening)\b|Greetings\b)/im.test(innerContent);
+      const prefixIsPreamble = /^(?:\*\*|\*|#{1,4}\s*)?(?:Here(?:'s| is)|Draft|Suggested|Email|Response)\b/i.test(prefix);
+
+      if (!prefixHasGreeting && (prefixIsPreamble || innerHasGreeting)) {
+        text = innerContent;
+      } else {
+        text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+      }
+    } else {
+      text = text.replace(/^```(?:markdown|text|email)?\s*\n?/i, '').replace(/\n?```$/i, '').trim();
+    }
   }
 
   // 5. Remove Meta Headers & Label Lines (handles multiple stacked headers)
@@ -62,7 +77,7 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
     prevText = text;
     text = text
       .replace(
-        /^(?:\*\*)?(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|(?:Subject|Re):\s*[^\n]*|Email:?|Suggested Reply:?)(?:\*\*)?\s*\n+/i,
+        /^(?:\*\*|\*|#{1,4}\s*)?(?:Here is (?:the|a) (?:draft|reply|response|suggested reply):?|Draft reply:?|Draft:?|Response:?|(?:Subject|Re):\s*[^\n]*|Email:?|Suggested Reply:?|Thinking Process:?|Thought Process:?|Reasoning:?)(?:\*\*)?\s*\n+/i,
         ''
       )
       .trim();
@@ -96,13 +111,145 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
 
   // 8. Personalize generic "Hi there," or "Hi," to "Hi [Sender Name],"
   if (customerName && customerName.toLowerCase() !== 'there') {
-    text = text.replace(/^(?:Hi|Hello|Dear)\s+there,/im, `Hi ${customerName},`);
-    text = text.replace(/^(?:Hi|Hello|Dear),/im, `Hi ${customerName},`);
-    text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Name\],/im, `Hi ${customerName},`);
-    text = text.replace(/^(?:Hi|Hello|Dear)\s+\[Customer\],/im, `Hi ${customerName},`);
+    text = text.replace(
+      /^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b(?:[,\t ]+(?:(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?[A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*(?:[-'· \t][A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*)*|\[[^\]]+\]|there|customer|user|client)(?=[\t ]*[,!:]|[\r\n]|$))?[\t ]*[,!:]?/im,
+      `Hi ${customerName},`
+    );
+  } else {
+    text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Name\],/im, 'Hi there,');
+    text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Customer\],/im, 'Hi there,');
   }
 
   return text;
+}
+
+export function synthesizeSmartSupportDraft(
+  promptOrThread: string,
+  customerName = 'there',
+  kbSnippets: string[] = [],
+  macroHint = ''
+): string {
+  const lower = (promptOrThread || '').toLowerCase();
+  const name = customerName && customerName.toLowerCase() !== 'there' ? customerName : 'there';
+
+  // Extract Knowledge Base facts (URLs, phone numbers, clean excerpts)
+  let kbFact = '';
+  if (kbSnippets && kbSnippets.length > 0) {
+    const urls = Array.from(new Set(kbSnippets.flatMap((s) => s.match(/https?:\/\/[^\s)]+/g) || [])));
+    const phoneMatches = Array.from(
+      new Set(
+        kbSnippets.flatMap(
+          (s) => s.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,9}/g) || []
+        )
+      )
+    ).filter((p) => p.replace(/\D/g, '').length >= 8);
+
+    if (urls.length > 0 && phoneMatches.length > 0) {
+      kbFact = `For more details and direct access, please visit ${urls[0]} or contact our team at ${phoneMatches[0]}.`;
+    } else if (urls.length > 0) {
+      kbFact = `For additional details and self-service resources, you can visit ${urls[0]}.`;
+    } else if (phoneMatches.length > 0) {
+      kbFact = `If you need immediate assistance, please feel free to reach our team at ${phoneMatches[0]}.`;
+    } else {
+      const firstSnippet = kbSnippets.find((s) => s && s.trim().length > 10);
+      if (firstSnippet) {
+        const cleanSnippet = firstSnippet
+          .replace(/^(?:###|#|\*\*).*\n*/gm, '')
+          .replace(/\n+/g, ' ')
+          .trim();
+        if (cleanSnippet.length > 15) {
+          const excerpt = cleanSnippet.length > 180 ? cleanSnippet.slice(0, 177) + '...' : cleanSnippet;
+          kbFact = `As noted in our documentation: ${excerpt}`;
+        }
+      }
+    }
+  }
+
+  // Extract custom guidance / macroHint instructions
+  let hintParagraph = '';
+  const trimmedHint = (macroHint || '').trim();
+  if (trimmedHint) {
+    const formatted = trimmedHint.endsWith('.') || trimmedHint.endsWith('!') ? trimmedHint : `${trimmedHint}.`;
+    hintParagraph = `Please note: ${formatted}`;
+  }
+
+  const extras: string[] = [];
+  if (kbFact) extras.push(kbFact);
+  if (hintParagraph) extras.push(hintParagraph);
+  const extraBlock = extras.length > 0 ? `\n\n${extras.join('\n\n')}` : '';
+
+  // 1. Refund & Return intent
+  if (lower.includes('refund') || lower.includes('return') || lower.includes('money back')) {
+    return `Hi ${name},\n\nThank you for reaching out to us. I completely understand and would be glad to help you with your return and refund request.\n\nI have located your account and initiated the refund process in accordance with our return policy. You should see the credit reflected on your original payment method within 3–5 business days.${extraBlock}\n\nPlease don't hesitate to reach out if you have any questions in the meantime!\n\nBest regards,\nCustomer Support Team`;
+  }
+
+  // 2. Order Status & Shipping intent
+  if (
+    lower.includes('track') ||
+    lower.includes('shipping') ||
+    lower.includes('where is my order') ||
+    lower.includes('where is') ||
+    lower.includes('delivery') ||
+    lower.includes('delay') ||
+    lower.includes('package')
+  ) {
+    return `Hi ${name},\n\nThanks for checking in on your order status!\n\nYour shipment is on track and moving smoothly with our carrier. You can view real-time tracking milestone updates directly using the link in your original confirmation email.${extraBlock}\n\nIf you encounter any transit delays or need address adjustments, just let me know and I will be happy to assist.\n\nWarm regards,\nCustomer Support Team`;
+  }
+
+  // 3. Password / Account Access intent
+  if (
+    lower.includes('password') ||
+    lower.includes('login') ||
+    lower.includes('2fa') ||
+    lower.includes('account') ||
+    lower.includes('locked') ||
+    lower.includes('reset') ||
+    lower.includes('sign in')
+  ) {
+    return `Hi ${name},\n\nThank you for contacting support regarding your account access.\n\nI've generated a secure password reset link for you. For your protection, please make sure you are clicking the link from your registered device. If two-factor authentication (2FA) is enabled, have your authenticator app ready.${extraBlock}\n\nLet us know if you need any additional guidance getting back into your account!\n\nBest regards,\nCustomer Support Team`;
+  }
+
+  // 4. Billing / Invoice intent
+  if (
+    lower.includes('invoice') ||
+    lower.includes('receipt') ||
+    lower.includes('charge') ||
+    lower.includes('card') ||
+    lower.includes('billing') ||
+    lower.includes('subscription') ||
+    lower.includes('payment')
+  ) {
+    return `Hi ${name},\n\nThank you for contacting our billing department.\n\nI've reviewed your account history and confirmed your recent billing statement. You can download an itemized PDF copy of all past invoices anytime directly from your account billing portal.${extraBlock}\n\nIf you'd like to update your payment method or need a custom VAT/tax invoice, feel free to reply and I'll take care of it immediately.\n\nBest regards,\nCustomer Support Team`;
+  }
+
+  // 5. Technical Troubleshooting intent
+  if (
+    lower.includes('error') ||
+    lower.includes('bug') ||
+    lower.includes('crash') ||
+    lower.includes('issue') ||
+    lower.includes('not working') ||
+    lower.includes('broken') ||
+    lower.includes('failed') ||
+    lower.includes('troubleshoot') ||
+    lower.includes('glitch')
+  ) {
+    return `Hi ${name},\n\nThank you for reaching out regarding the issue you are experiencing. I apologize for the inconvenience this has caused.\n\nTo help resolve this quickly, could you please try clearing your browser cache or testing in an incognito window? If the issue persists, please reply with any relevant error codes, screenshots, or the exact steps to reproduce the problem so our technical team can investigate immediately.${extraBlock}\n\nWe appreciate your patience and look forward to getting this sorted out for you!\n\nBest regards,\nCustomer Support Team`;
+  }
+
+  // 6. Partnership & Collaboration intent
+  if (
+    lower.includes('partner') ||
+    lower.includes('collaboration') ||
+    lower.includes('collaborate') ||
+    lower.includes('affiliate') ||
+    lower.includes('sponsor')
+  ) {
+    return `Hi ${name},\n\nThank you for reaching out and for your interest in partnering with us! We are always excited to explore new collaboration opportunities.\n\nCould you please share a bit more detail about your organization, your audience, and what kind of partnership structure you have in mind? I'll make sure this gets routed directly to our partnerships team.${extraBlock}\n\nLooking forward to hearing from you,\nCustomer Support Team`;
+  }
+
+  // 7. Default General Support Reply
+  return `Hi ${name},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?${extraBlock}\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
 }
 
 const SALUTATION_BLACKLIST = [
@@ -135,15 +282,30 @@ const SALUTATION_BLACKLIST = [
   'info',
   'admin',
   'administrator',
+  'greetings',
+  'morning',
+  'afternoon',
+  'evening',
+  'folks',
+  'colleague',
+  'colleagues',
+  'i',
+  'we',
+  'my',
+  'our',
+  'thank',
+  'just',
 ];
 
 export function extractSenderName(text: string): string {
   if (!text) return 'there';
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
-  const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
-  const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
+  const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/i);
+  const signMatch = text.match(
+    /(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Za-z\u00C0-\u024F]+(?:[-'·][A-Za-z\u00C0-\u024F]+)*)/i
+  );
   const greetMatch = text.match(
-    /(?:hi|dear|hello),?\s+(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
+    /(?:hi|hello|dear|hey|good\s+(?:morning|afternoon|evening|day)|greetings),?[^\S\r\n]+(?:(?:mr|mrs|ms|miss|dr|prof)\.?[^\S\r\n]+)?([A-Za-z\u00C0-\u024F]+(?:[-'·][A-Za-z\u00C0-\u024F]+)*(?:\s*[/]\s*[A-Za-z\u00C0-\u024F]+(?:[-'·][A-Za-z\u00C0-\u024F]+)*)?)/i
   );
 
   if (fromMatch && fromMatch[1].trim()) {
@@ -746,6 +908,7 @@ export class ApiClient {
                 matchedMacro,
                 kbSnippets,
               }),
+              signal: AbortSignal.timeout(12000),
             });
 
             if (res.status === 403) {
@@ -800,63 +963,16 @@ export class ApiClient {
         }
       } else {
         draftSource = 'template';
-        const name = customerName && customerName.toLowerCase() !== 'there' ? customerName : 'there';
-        if (lowerThread.includes('refund') || lowerThread.includes('return') || lowerThread.includes('money back')) {
-          draftText = `Hi ${name},\n\nThank you for reaching out to us. I completely understand and would be glad to help you with your return and refund request.\n\nI have located your account and initiated the refund process in accordance with our return policy. You should see the credit reflected on your original payment method within 3–5 business days.\n\nPlease don't hesitate to reach out if you have any questions in the meantime!\n\nBest regards,\nCustomer Support Team`;
-        } else if (
-          lowerThread.includes('track') ||
-          lowerThread.includes('shipping') ||
-          lowerThread.includes('where is my order') ||
-          lowerThread.includes('where is') ||
-          lowerThread.includes('delivery') ||
-          lowerThread.includes('delay') ||
-          lowerThread.includes('package')
-        ) {
-          draftText = `Hi ${name},\n\nThanks for checking in on your order status!\n\nYour shipment is on track and moving smoothly with our carrier. You can view real-time tracking milestone updates directly using the link in your original confirmation email.\n\nIf you encounter any transit delays or need address adjustments, just let me know and I will be happy to assist.\n\nWarm regards,\nCustomer Support Team`;
-        } else if (
-          lowerThread.includes('password') ||
-          lowerThread.includes('login') ||
-          lowerThread.includes('2fa') ||
-          lowerThread.includes('account') ||
-          lowerThread.includes('locked') ||
-          lowerThread.includes('reset') ||
-          lowerThread.includes('sign in')
-        ) {
-          draftText = `Hi ${name},\n\nThank you for contacting support regarding your account access.\n\nI've generated a secure password reset link for you. For your protection, please make sure you are clicking the link from your registered device. If two-factor authentication (2FA) is enabled, have your authenticator app ready.\n\nLet us know if you need any additional guidance getting back into your account!\n\nBest regards,\nCustomer Support Team`;
-        } else if (
-          lowerThread.includes('invoice') ||
-          lowerThread.includes('receipt') ||
-          lowerThread.includes('charge') ||
-          lowerThread.includes('card') ||
-          lowerThread.includes('billing') ||
-          lowerThread.includes('subscription') ||
-          lowerThread.includes('payment')
-        ) {
-          draftText = `Hi ${name},\n\nThank you for contacting our billing department.\n\nI've reviewed your account history and confirmed your recent billing statement. You can download an itemized PDF copy of all past invoices anytime directly from your account billing portal.\n\nIf you'd like to update your payment method or need a custom VAT/tax invoice, feel free to reply and I'll take care of it immediately.\n\nBest regards,\nCustomer Support Team`;
-        } else if (
-          lowerThread.includes('error') ||
-          lowerThread.includes('bug') ||
-          lowerThread.includes('crash') ||
-          lowerThread.includes('issue') ||
-          lowerThread.includes('not working') ||
-          lowerThread.includes('broken') ||
-          lowerThread.includes('failed') ||
-          lowerThread.includes('troubleshoot') ||
-          lowerThread.includes('glitch')
-        ) {
-          draftText = `Hi ${name},\n\nThank you for reaching out regarding the issue you are experiencing. I apologize for the inconvenience this has caused.\n\nTo help resolve this quickly, could you please try clearing your browser cache or testing in an incognito window? If the issue persists, please reply with any relevant error codes, screenshots, or the exact steps to reproduce the problem so our technical team can investigate immediately.\n\nWe appreciate your patience and look forward to getting this sorted out for you!\n\nBest regards,\nCustomer Support Team`;
-        } else if (
-          lowerThread.includes('partner') ||
-          lowerThread.includes('collaboration') ||
-          lowerThread.includes('collaborate') ||
-          lowerThread.includes('affiliate') ||
-          lowerThread.includes('sponsor')
-        ) {
-          draftText = `Hi ${name},\n\nThank you for reaching out and for your interest in partnering with us! We are always excited to explore new collaboration opportunities.\n\nCould you please share a bit more detail about your organization, your audience, and what kind of partnership structure you have in mind? I'll make sure this gets routed directly to our partnerships team.\n\nLooking forward to hearing from you,\nCustomer Support Team`;
-        } else {
-          draftText = `Hi ${name},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
-        }
+        draftText = synthesizeSmartSupportDraft(scrubbed, customerName, kbSnippets, macroHint || '');
       }
+    }
+
+    // Ensure draftText is thoroughly sanitized before saving to telemetry or returning to client
+    draftText = cleanAiDraft(draftText, customerName);
+    if (!draftText && !matchedMacro) {
+      draftSource = 'template';
+      draftNotice = 'AI response was invalid or contained only reasoning artifacts. Generated using fallback template.';
+      draftText = synthesizeSmartSupportDraft(scrubbed, customerName, kbSnippets, macroHint || '');
     }
 
     // 6. Save draft generation event to Supabase draft_history for live analytics
