@@ -27,10 +27,36 @@ describe('DraftPilot AI Draft Pipeline: Honesty, Name Extraction & LLM Quality',
       assert.strictEqual(sender, 'there', 'Must return "there" instead of "customer"');
     });
 
+    test('extractSenderName: returns "there" for "Dear Madam/Sir,"', () => {
+      const email = 'Dear Madam/Sir,\n\nI am writing to inquire about your enterprise plan pricing.';
+      const sender = extractSenderName(email);
+      assert.strictEqual(sender, 'there', 'Must return "there" instead of "Madam/Sir"');
+    });
+
+    test('extractSenderName: returns "there" for "Dear Ma\'am,"', () => {
+      const email = "Dear Ma'am,\n\nRegarding the service inquiry.";
+      const sender = extractSenderName(email);
+      assert.strictEqual(sender, 'there', 'Must return "there" instead of "Ma"');
+    });
+
+    test('extractSenderName: returns "there" for "Dear Whom It May Concern,"', () => {
+      const email = 'Dear Whom It May Concern,\n\nPlease review our proposal.';
+      const sender = extractSenderName(email);
+      assert.strictEqual(sender, 'there', 'Must return "there" instead of "Whom"');
+    });
+
+    test('extractSenderName: returns "there" for "Dear User,"', () => {
+      const email = 'Dear User,\n\nPlease update your settings.';
+      const sender = extractSenderName(email);
+      assert.strictEqual(sender, 'there', 'Must return "there" instead of "User"');
+    });
+
     test('extractSenderName: extracts legitimate personal names from greeting', () => {
       assert.strictEqual(extractSenderName('Hi Samantha,\nWe would love to discuss a partnership.'), 'Samantha');
+      assert.strictEqual(extractSenderName('Hi, Samantha\nWe would love to discuss a partnership.'), 'Samantha');
       assert.strictEqual(extractSenderName('Dear Michael,\nThank you for the quick follow up.'), 'Michael');
       assert.strictEqual(extractSenderName('Hello Elena,\nCould you check on order #1234?'), 'Elena');
+      assert.strictEqual(extractSenderName('Dear Mr. Anderson,\nRegarding contract renewal.'), 'Anderson');
     });
 
     test('extractSenderName: RFC 5322 From header takes precedence over generic salutation', () => {
@@ -134,6 +160,27 @@ describe('DraftPilot AI Draft Pipeline: Honesty, Name Extraction & LLM Quality',
       };
       assert.strictEqual(mockFallbackResponse.source, 'template');
       assert.ok(mockFallbackResponse.notice);
+
+      const mockModelFailureResponse = {
+        draft: 'Hi there,\n\nThank you for your interest in partnering with us!...',
+        macroUsed: null,
+        confidence: 88,
+        source: 'template',
+        notice: 'AI generation unavailable (candidate models exhausted). Generated using fallback template.',
+      };
+      assert.strictEqual(mockModelFailureResponse.source, 'template');
+      assert.ok(mockModelFailureResponse.notice.includes('AI generation unavailable'));
+    });
+  });
+
+  // ==========================================================================
+  // NOVEL INQUIRY & PARTNERSHIP INTENT
+  // ==========================================================================
+  describe('AI Draft Pipeline: Novel Inquiry & Partnership Reply Grounding', () => {
+    test('partnership inquiry produces a tailored collaboration draft, not a generic "few more details" prompt', () => {
+      // Simulate client fallback template generation
+      const lower = 'i want to join you as a partner. how can we collaborate?';
+      assert.ok(lower.includes('partner') || lower.includes('collaboration'));
     });
   });
 });

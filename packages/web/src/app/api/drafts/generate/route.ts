@@ -99,66 +99,75 @@ function cleanAiDraft(rawText: string, customerName = 'there'): string {
   return text;
 }
 
+const SALUTATION_BLACKLIST = [
+  'there',
+  'team',
+  'support',
+  'all',
+  'everyone',
+  'sir',
+  'madam',
+  'sir/madam',
+  'madam/sir',
+  "ma'am",
+  'concern',
+  'customer',
+  'user',
+  'client',
+  'can',
+  'could',
+  'would',
+  'please',
+  'whom',
+  'whomever',
+  'friend',
+  'member',
+  'anyone',
+  'somebody',
+  'someone',
+  'help',
+  'info',
+  'admin',
+  'administrator',
+];
+
 function extractSenderName(text: string): string {
   if (!text) return 'there';
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
+  const greetMatch = text.match(
+    /(?:hi|dear|hello),?\s+(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
+  );
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
     if (clean && !clean.toLowerCase().includes('redacted')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (lineAngleMatch && lineAngleMatch[1].trim()) {
     const clean = lineAngleMatch[1].trim();
     if (clean && !clean.toLowerCase().startsWith('subject')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (signMatch && signMatch[1]) {
     const clean = signMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(clean.toLowerCase())) {
+    if (!SALUTATION_BLACKLIST.includes(clean.toLowerCase())) {
       return clean;
     }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(candidate.toLowerCase())) {
+    const normalized = candidate.replace(/\s*[/]\s*/, '/').toLowerCase();
+    if (!SALUTATION_BLACKLIST.includes(normalized)) {
       return candidate;
     }
   }
@@ -228,7 +237,18 @@ function synthesizeSmartSupportDraft(promptOrThread: string, customerName = 'the
     return `Hi ${name},\n\nThank you for reaching out regarding the issue you are experiencing. I apologize for the inconvenience this has caused.\n\nTo help resolve this quickly, could you please try clearing your browser cache or testing in an incognito window? If the issue persists, please reply with any relevant error codes, screenshots, or the exact steps to reproduce the problem so our technical team can investigate immediately.\n\nWe appreciate your patience and look forward to getting this sorted out for you!\n\nBest regards,\nCustomer Support Team`;
   }
 
-  // 6. Default General Support Reply
+  // 6. Partnership & Collaboration intent
+  if (
+    lower.includes('partner') ||
+    lower.includes('collaboration') ||
+    lower.includes('collaborate') ||
+    lower.includes('affiliate') ||
+    lower.includes('sponsor')
+  ) {
+    return `Hi ${name},\n\nThank you for reaching out and for your interest in partnering with us! We are always excited to explore new collaboration opportunities.\n\nCould you please share a bit more detail about your organization, your audience, and what kind of partnership structure you have in mind? I'll make sure this gets routed directly to our partnerships team.\n\nLooking forward to hearing from you,\nCustomer Support Team`;
+  }
+
+  // 7. Default General Support Reply
   return `Hi ${name},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
 }
 
@@ -359,6 +379,7 @@ export async function POST(req: NextRequest) {
     const customerName = extractSenderName(scrubbedThreadContent);
     let draftText = '';
     let openRouterSuccess = false;
+    let lastOpenRouterError = '';
 
     const baseSystemPrompt =
       settings?.system_prompt?.trim() ||
@@ -469,6 +490,9 @@ CRITICAL INSTRUCTIONS:
         if (fallbackModel && !candidateModels.includes(fallbackModel)) candidateModels.push(fallbackModel);
         if (!candidateModels.includes('z-ai/glm-5.3-flash')) candidateModels.push('z-ai/glm-5.3-flash');
         if (!candidateModels.includes('z-ai/glm-5.2:free')) candidateModels.push('z-ai/glm-5.2:free');
+        if (!candidateModels.includes('meta-llama/llama-3.1-8b-instruct:free')) candidateModels.push('meta-llama/llama-3.1-8b-instruct:free');
+        if (!candidateModels.includes('meta-llama/llama-3.3-70b-instruct:free')) candidateModels.push('meta-llama/llama-3.3-70b-instruct:free');
+        if (!candidateModels.includes('mistralai/mistral-small-3.1-24b-instruct:free')) candidateModels.push('mistralai/mistral-small-3.1-24b-instruct:free');
 
         for (const modelToTry of candidateModels) {
           try {
@@ -510,12 +534,17 @@ CRITICAL INSTRUCTIONS:
                 break;
               }
             } else {
+              const errSnippet = typeof openRouterData?.error === 'string'
+                ? openRouterData.error
+                : (openRouterData?.error?.message || openrouterRes.statusText);
+              lastOpenRouterError = `${modelToTry}: ${openrouterRes.status} ${errSnippet}`;
               console.warn(
                 `Model ${modelToTry} attempt failed (${openrouterRes.status}):`,
                 openRouterData?.error || openrouterRes.statusText
               );
             }
-          } catch (modelErr) {
+          } catch (modelErr: any) {
+            lastOpenRouterError = `${modelToTry}: ${modelErr?.message || 'Network error'}`;
             console.warn(`Model ${modelToTry} error:`, modelErr);
           }
         }
@@ -603,14 +632,21 @@ CRITICAL INSTRUCTIONS:
       ? 'openrouter'
       : (matchedMacro?.content ? 'macro' : 'template');
 
+    let notice: string | undefined;
+    if (!openRouterSuccess) {
+      if (!openrouterApiKey) {
+        notice = 'No OpenRouter API key configured in Platform Settings or environment. Generated using fallback template.';
+      } else {
+        notice = `AI generation unavailable (${lastOpenRouterError || 'candidate models exhausted'}). Generated using fallback template.`;
+      }
+    }
+
     return NextResponse.json({
       draft: scrubbedDraftText,
       macroUsed: matchedMacro?.name || null,
       confidence: matchedMacro ? 96 : (openRouterSuccess ? 92 : 88),
       source: draftSource,
-      ...(!openRouterSuccess && !openrouterApiKey
-        ? { notice: 'No OpenRouter API key configured in Platform Settings. Generated using fallback template.' }
-        : {}),
+      ...(notice ? { notice } : {}),
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

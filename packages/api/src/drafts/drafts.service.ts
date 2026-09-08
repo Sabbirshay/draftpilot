@@ -5,66 +5,75 @@ import { BillingService } from '../billing/billing.service';
 import { GenerateDraftDto } from './dto/generate-draft.dto';
 import { scrubPII } from '../utils/pii-scrubber';
 
+const SALUTATION_BLACKLIST = [
+  'there',
+  'team',
+  'support',
+  'all',
+  'everyone',
+  'sir',
+  'madam',
+  'sir/madam',
+  'madam/sir',
+  "ma'am",
+  'concern',
+  'customer',
+  'user',
+  'client',
+  'can',
+  'could',
+  'would',
+  'please',
+  'whom',
+  'whomever',
+  'friend',
+  'member',
+  'anyone',
+  'somebody',
+  'someone',
+  'help',
+  'info',
+  'admin',
+  'administrator',
+];
+
 function extractSenderName(text: string): string {
   if (!text) return 'there';
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
+  const greetMatch = text.match(
+    /(?:hi|dear|hello),?\s+(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
+  );
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
     if (clean && !clean.toLowerCase().includes('redacted')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (lineAngleMatch && lineAngleMatch[1].trim()) {
     const clean = lineAngleMatch[1].trim();
     if (clean && !clean.toLowerCase().startsWith('subject')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (signMatch && signMatch[1]) {
     const clean = signMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(clean.toLowerCase())) {
+    if (!SALUTATION_BLACKLIST.includes(clean.toLowerCase())) {
       return clean;
     }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(candidate.toLowerCase())) {
+    const normalized = candidate.replace(/\s*[/]\s*/, '/').toLowerCase();
+    if (!SALUTATION_BLACKLIST.includes(normalized)) {
       return candidate;
     }
   }

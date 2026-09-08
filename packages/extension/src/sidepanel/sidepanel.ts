@@ -165,15 +165,48 @@ class SidePanel {
             badgeEl.innerText = 'AI Generated';
             badgeEl.style.background = 'rgba(124, 58, 237, 0.2)';
             badgeEl.style.color = '#a78bfa';
+            badgeEl.title = 'Authentic AI generated output via OpenRouter LLM';
           } else if (result.source === 'macro') {
             badgeEl.innerText = result.macroUsed ? `Macro: ${result.macroUsed}` : 'Quick Reply';
             badgeEl.style.background = 'rgba(59, 130, 246, 0.2)';
             badgeEl.style.color = '#60a5fa';
+            badgeEl.title = result.macroUsed ? `Grounded support macro: ${result.macroUsed}` : 'Quick reply macro';
           } else {
             badgeEl.innerText = 'Template Reply';
             badgeEl.style.background = 'rgba(234, 179, 8, 0.2)';
             badgeEl.style.color = '#fbbf24';
+            badgeEl.title = (result as any).notice || 'Grounded fallback template (not AI generated)';
           }
+        }
+
+        const titleEl = document.querySelector('#draft-result-container h4');
+        if (titleEl) {
+          (titleEl as HTMLElement).innerText =
+            result.source === 'openrouter' || result.source === 'ai'
+              ? 'Generated AI Reply'
+              : (result.source === 'macro' ? 'Macro Quick Reply' : 'Template Reply');
+        }
+
+        let noticeEl = document.getElementById('draft-notice');
+        if (!noticeEl) {
+          noticeEl = document.createElement('div');
+          noticeEl.id = 'draft-notice';
+          noticeEl.style.fontSize = '11px';
+          noticeEl.style.marginTop = '4px';
+          noticeEl.style.marginBottom = '8px';
+          noticeEl.style.color = '#fbbf24';
+          const container = document.getElementById('draft-result-container');
+          const contentBox = document.getElementById('draft-content');
+          if (container && contentBox) {
+            container.insertBefore(noticeEl, contentBox);
+          }
+        }
+        if ((result as any).notice && result.source !== 'openrouter' && result.source !== 'ai') {
+          noticeEl.innerText = `ℹ️ ${(result as any).notice}`;
+          noticeEl.classList.remove('hidden');
+        } else {
+          noticeEl.innerText = '';
+          noticeEl.classList.add('hidden');
         }
 
         document.getElementById('draft-result-container')?.classList.remove('hidden');

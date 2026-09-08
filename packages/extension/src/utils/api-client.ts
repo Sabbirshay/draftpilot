@@ -105,66 +105,75 @@ export function cleanAiDraft(rawText: string, customerName = 'there'): string {
   return text;
 }
 
+const SALUTATION_BLACKLIST = [
+  'there',
+  'team',
+  'support',
+  'all',
+  'everyone',
+  'sir',
+  'madam',
+  'sir/madam',
+  'madam/sir',
+  "ma'am",
+  'concern',
+  'customer',
+  'user',
+  'client',
+  'can',
+  'could',
+  'would',
+  'please',
+  'whom',
+  'whomever',
+  'friend',
+  'member',
+  'anyone',
+  'somebody',
+  'someone',
+  'help',
+  'info',
+  'admin',
+  'administrator',
+];
+
 export function extractSenderName(text: string): string {
   if (!text) return 'there';
   const fromMatch = text.match(/(?:from|sender):\s*([^<\n\r]+?)(?:<|\n|$)/i);
   const lineAngleMatch = text.match(/(?:^|\n)([A-Za-z][A-Za-z0-9\s._-]{1,40}?)\s*<[^>\n\r]+>/);
   const signMatch = text.match(/(?:thanks|regards|cheers|best|sincerely|thank you),?\s*\n+([A-Z][a-z]+)/i);
-  const greetMatch = text.match(/(?:hi|dear|hello)\s+([A-Za-z]+(?:\/[A-Za-z]+)?)/i);
+  const greetMatch = text.match(
+    /(?:hi|dear|hello),?\s+(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?([A-Za-z]+(?:\s*[/]\s*[A-Za-z]+|['][A-Za-z]+)?)/i
+  );
 
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
     if (clean && !clean.toLowerCase().includes('redacted')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (lineAngleMatch && lineAngleMatch[1].trim()) {
     const clean = lineAngleMatch[1].trim();
     if (clean && !clean.toLowerCase().startsWith('subject')) {
-      return clean.split(' ')[0];
+      const candidate = clean.split(' ')[0];
+      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
   }
   if (signMatch && signMatch[1]) {
     const clean = signMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(clean.toLowerCase())) {
+    if (!SALUTATION_BLACKLIST.includes(clean.toLowerCase())) {
       return clean;
     }
   }
   if (greetMatch && greetMatch[1]) {
     const candidate = greetMatch[1].trim();
-    const blacklist = [
-      'there',
-      'team',
-      'support',
-      'all',
-      'everyone',
-      'sir',
-      'madam',
-      'sir/madam',
-      'concern',
-      'customer',
-      'can',
-      'could',
-      'would',
-      'please',
-    ];
-    if (!blacklist.includes(candidate.toLowerCase())) {
+    const normalized = candidate.replace(/\s*[/]\s*/, '/').toLowerCase();
+    if (!SALUTATION_BLACKLIST.includes(normalized)) {
       return candidate;
     }
   }
@@ -713,6 +722,7 @@ export class ApiClient {
     let draftText = '';
     let serverSuccess = false;
     let draftSource: 'openrouter' | 'macro' | 'template' = 'template';
+    let draftNotice: string | undefined = undefined;
 
     if (token) {
       try {
@@ -762,6 +772,7 @@ export class ApiClient {
             draftText = genData.draft;
             serverSuccess = true;
             draftSource = genData.source || 'openrouter';
+            draftNotice = genData.notice;
           }
         }
       } catch (err: any) {
@@ -774,6 +785,7 @@ export class ApiClient {
 
     // 5. High-Fidelity Grounded Fallback if server was offline
     if (!serverSuccess) {
+      draftNotice = 'DraftPilot web server unreachable. Generated using offline fallback template.';
       if (matchedMacro) {
         draftSource = 'macro';
         draftText = matchedMacro.content
@@ -833,6 +845,14 @@ export class ApiClient {
           lowerThread.includes('glitch')
         ) {
           draftText = `Hi ${name},\n\nThank you for reaching out regarding the issue you are experiencing. I apologize for the inconvenience this has caused.\n\nTo help resolve this quickly, could you please try clearing your browser cache or testing in an incognito window? If the issue persists, please reply with any relevant error codes, screenshots, or the exact steps to reproduce the problem so our technical team can investigate immediately.\n\nWe appreciate your patience and look forward to getting this sorted out for you!\n\nBest regards,\nCustomer Support Team`;
+        } else if (
+          lowerThread.includes('partner') ||
+          lowerThread.includes('collaboration') ||
+          lowerThread.includes('collaborate') ||
+          lowerThread.includes('affiliate') ||
+          lowerThread.includes('sponsor')
+        ) {
+          draftText = `Hi ${name},\n\nThank you for reaching out and for your interest in partnering with us! We are always excited to explore new collaboration opportunities.\n\nCould you please share a bit more detail about your organization, your audience, and what kind of partnership structure you have in mind? I'll make sure this gets routed directly to our partnerships team.\n\nLooking forward to hearing from you,\nCustomer Support Team`;
         } else {
           draftText = `Hi ${name},\n\nThank you for getting in touch with us! I have reviewed your inquiry and would be glad to assist you.\n\nCould you please provide a few more details so I can resolve this as quickly as possible for you?\n\nLooking forward to hearing back from you,\nCustomer Support Team`;
         }
@@ -877,6 +897,7 @@ export class ApiClient {
       macroUsed: matchedMacro?.name || null,
       confidence: matchedMacro ? 96 : 88,
       source: draftSource,
+      ...(draftNotice ? { notice: draftNotice } : {}),
     };
   }
 
