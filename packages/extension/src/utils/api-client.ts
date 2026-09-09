@@ -883,15 +883,21 @@ export class ApiClient {
     // 4. Request draft generation securely from server endpoint (keeping API keys server-side)
     let draftText = '';
     let serverSuccess = false;
+    let serverRecorded = false;
     let draftSource: 'openrouter' | 'macro' | 'template' = 'template';
     let draftNotice: string | undefined = undefined;
 
     if (token) {
       try {
-        const candidateUrls = [`${this.webUrl}/api/drafts/generate`];
-        if (!this.webUrl.includes('localhost') && !this.webUrl.includes('127.0.0.1')) {
-          candidateUrls.push('http://localhost:3000/api/drafts/generate');
+        const candidateUrls: string[] = [];
+        if (this.webUrl) candidateUrls.push(`${this.webUrl}/api/drafts/generate`);
+        if (!candidateUrls.includes('https://draftpilot-web.vercel.app/api/drafts/generate')) {
+          candidateUrls.push('https://draftpilot-web.vercel.app/api/drafts/generate');
         }
+        candidateUrls.push('http://localhost:3000/api/drafts/generate');
+        candidateUrls.push('http://localhost:3001/api/drafts/generate');
+        candidateUrls.push('http://127.0.0.1:3000/api/drafts/generate');
+        candidateUrls.push('http://127.0.0.1:3001/api/drafts/generate');
 
         let genRes: Response | null = null;
         for (const url of candidateUrls) {
@@ -934,6 +940,7 @@ export class ApiClient {
           if (genData.draft) {
             draftText = genData.draft;
             serverSuccess = true;
+            serverRecorded = Boolean(genData.draftRecorded);
             draftSource = genData.source || 'openrouter';
             draftNotice = genData.notice;
           }
@@ -946,9 +953,91 @@ export class ApiClient {
       }
     }
 
-    // 5. High-Fidelity Grounded Fallback if server was offline
+    // 5. Client-Side OpenRouter Generation (Direct AI Fallback if server was offline or unreachable)
+    if (!serverSuccess && token) {
+      try {
+        const settingsRes = await fetch(`${SUPABASE_URL}/rest/v1/platform_settings?select=*&limit=1`, {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (settingsRes.ok) {
+          const settingsArr = await settingsRes.json();
+          const settings = settingsArr && settingsArr[0] ? settingsArr[0] : null;
+          const openrouterApiKey = settings?.openrouter_api_key?.trim();
+
+          if (openrouterApiKey) {
+            const activeModel = settings?.selected_model || settings?.openrouter_model || 'z-ai/glm-5.3-flash';
+            const candidateModels = [activeModel, 'z-ai/glm-5.3-flash', 'google/gemma-4-26b-a4b-it:free', 'meta-llama/llama-3.1-8b-instruct:free'].filter(
+              (m, i, arr) => arr.indexOf(m) === i
+            );
+
+            let knowledgeContext = '';
+            if (matchedMacro?.content) {
+              knowledgeContext += `### Recommended Support Macro & Policy:\n${matchedMacro.content}\n\n`;
+            }
+            if (kbSnippets.length > 0) {
+              knowledgeContext += `### Knowledge Base & Documentation Context:\n${kbSnippets.join('\n---\n')}\n\n`;
+            }
+            let agentGuidanceContext = '';
+            if (macroHint?.trim()) {
+              agentGuidanceContext = `### Agent Guidance / Custom Instruction:\n${macroHint.trim()}\n\n`;
+            }
+
+            const baseSystemPrompt = settings?.system_prompt?.trim() || 'You are DraftPilot, an intelligent customer support assistant.';
+            const strictSystemPrompt = `${baseSystemPrompt}\n\nCRITICAL INSTRUCTIONS:\n1. Output ONLY the raw final email reply text ready to send.\n2. Absolutely DO NOT output any thinking process, analysis, reasoning steps, or markdown bullets.\n3. Start directly with "Hi ${customerName}," and end with "Best regards,\\nCustomer Support Team".\n4. Do NOT wrap in markdown code blocks.`;
+            const userPrompt = `Customer Message:\n${scrubbed}\n\n${knowledgeContext}${agentGuidanceContext}Write the clean, direct customer email reply now:`;
+
+            for (const modelToTry of candidateModels) {
+              try {
+                const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${openrouterApiKey}`,
+                    'HTTP-Referer': 'https://draftpilot-web.vercel.app',
+                    'X-Title': 'DraftPilot',
+                  },
+                  body: JSON.stringify({
+                    model: modelToTry,
+                    messages: [
+                      { role: 'system', content: strictSystemPrompt },
+                      { role: 'user', content: userPrompt },
+                    ],
+                    max_tokens: Number(settings?.max_tokens) || 1000,
+                    temperature: Number(settings?.temperature) || 0.4,
+                  }),
+                  signal: AbortSignal.timeout(15000),
+                });
+
+                if (orRes.ok) {
+                  const orData = await orRes.json();
+                  const raw = orData?.choices?.[0]?.message?.content;
+                  const cleaned = cleanAiDraft(raw || '', customerName);
+                  if (cleaned && cleaned.length > 15) {
+                    draftText = cleaned;
+                    serverSuccess = true;
+                    draftSource = 'openrouter';
+                    draftNotice = undefined;
+                    break;
+                  }
+                }
+              } catch (orErr) {
+                console.warn(`Direct OpenRouter model ${modelToTry} attempt note:`, orErr);
+              }
+            }
+          }
+        }
+      } catch (clientAiErr) {
+        console.warn('Client-side OpenRouter fallback note:', clientAiErr);
+      }
+    }
+
+    // 6. Grounded Macro / Template Synthesizer if both server and direct AI were unavailable
     if (!serverSuccess) {
-      draftNotice = 'DraftPilot web server unreachable. Generated using offline fallback template.';
       if (matchedMacro) {
         draftSource = 'macro';
         draftText = matchedMacro.content
@@ -963,6 +1052,7 @@ export class ApiClient {
         }
       } else {
         draftSource = 'template';
+        draftNotice = 'DraftPilot AI generation unavailable. Generated using fallback template.';
         draftText = synthesizeSmartSupportDraft(scrubbed, customerName, kbSnippets, macroHint || '');
       }
     }
@@ -975,12 +1065,49 @@ export class ApiClient {
       draftText = synthesizeSmartSupportDraft(scrubbed, customerName, kbSnippets, macroHint || '');
     }
 
-    // 6. Save draft generation event to Supabase draft_history for live analytics
-    if (token && teamId) {
+    // 7. Guarantee draft event is recorded in draft_history and monthly usage table
+    if (token && teamId && !serverRecorded) {
       try {
         const userId = await this.getUserId();
-        if (userId) {
-          const histRes = await fetch(`${SUPABASE_URL}/rest/v1/draft_history`, {
+        let recordSuccess = false;
+
+        const recordUrls: string[] = [];
+        if (this.webUrl) recordUrls.push(`${this.webUrl}/api/drafts/record`);
+        if (!recordUrls.includes('https://draftpilot-web.vercel.app/api/drafts/record')) {
+          recordUrls.push('https://draftpilot-web.vercel.app/api/drafts/record');
+        }
+        recordUrls.push('http://localhost:3000/api/drafts/record');
+        recordUrls.push('http://localhost:3001/api/drafts/record');
+        recordUrls.push('http://127.0.0.1:3000/api/drafts/record');
+        recordUrls.push('http://127.0.0.1:3001/api/drafts/record');
+
+        for (const rUrl of recordUrls) {
+          try {
+            const rRes = await fetch(rUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                teamId,
+                userId,
+                threadSnippet: scrubbed.slice(0, 200),
+                generatedDraft: draftText,
+                macroUsedId: matchedMacro?.id || null,
+              }),
+              signal: AbortSignal.timeout(5000),
+            });
+            if (rRes.ok) {
+              recordSuccess = true;
+              break;
+            }
+          } catch {}
+        }
+
+        // Direct Supabase fallback if server record endpoint was unreachable
+        if (!recordSuccess && userId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/draft_history`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -995,17 +1122,14 @@ export class ApiClient {
               generated_draft: draftText,
               macro_used_id: matchedMacro?.id || null,
             }),
-          });
-          if (!histRes.ok) {
-            console.warn('draft_history insert status:', histRes.status, await histRes.text());
-          }
+          }).catch(() => {});
         }
       } catch (err) {
         console.warn('Telemetry logging note:', err);
       }
     }
 
-    // 7. Record heartbeat pairing telemetry on draft generation
+    // 8. Record heartbeat pairing telemetry on draft generation
     this.recordHeartbeat().catch(() => {});
 
     return {
@@ -1043,7 +1167,36 @@ export class ApiClient {
         }
       }
 
-      // 2. Fetch draft count
+      // 2. Fetch draft count from server metrics endpoint first
+      let count = 0;
+      try {
+        const metricUrls = [`${this.webUrl}/api/dashboard/metrics`];
+        if (!metricUrls.includes('https://draftpilot-web.vercel.app/api/dashboard/metrics')) {
+          metricUrls.push('https://draftpilot-web.vercel.app/api/dashboard/metrics');
+        }
+        metricUrls.push('http://localhost:3000/api/dashboard/metrics');
+        metricUrls.push('http://localhost:3001/api/dashboard/metrics');
+
+        for (const mUrl of metricUrls) {
+          try {
+            const mRes = await fetch(mUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(3000),
+            });
+            if (mRes.ok) {
+              const mData = await mRes.json();
+              if (mData.draftsCount !== undefined && mData.draftsCount !== null) {
+                count = mData.draftsCount;
+                if (mData.monthlyLimit) limit = mData.monthlyLimit;
+                if (mData.teamPlan) plan = mData.teamPlan;
+                return { used: count, limit, draftsUsed: count, draftsLimit: limit, plan };
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+
+      // 3. Fallback: Fetch draft count from draft_history REST API
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/draft_history?team_id=eq.${teamId}&select=id`,
         {
@@ -1053,7 +1206,6 @@ export class ApiClient {
           },
         }
       );
-      let count = 0;
       if (res.ok) {
         const data = await res.json();
         count = Array.isArray(data) ? data.length : 0;

@@ -35,13 +35,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const data = await chrome.storage.local.get(['token']);
         sendResponse({ token: data.token || null });
       } else if (message.type === 'SET_AUTH_TOKEN') {
-        // Restrict sensitive auth token mutation strictly to extension internal contexts
-        if (sender.tab) {
-          sendResponse({ success: false, error: 'Access denied: Content scripts cannot set auth tokens' });
+        const isAuthorizedWebOrigin = (url?: string) => {
+          if (!url) return false;
+          try {
+            const u = new URL(url);
+            return (
+              u.hostname === 'localhost' ||
+              u.hostname === '127.0.0.1' ||
+              u.hostname === 'draftpilot-web.vercel.app' ||
+              u.hostname.endsWith('.vercel.app')
+            );
+          } catch {
+            return false;
+          }
+        };
+
+        if (sender.tab && !isAuthorizedWebOrigin(sender.tab.url)) {
+          sendResponse({ success: false, error: 'Access denied: Unauthorized origin for auth token sync' });
           return;
         }
+
         if (typeof message.token === 'string' || message.token === null) {
-          await chrome.storage.local.set({ token: message.token });
+          const updates: Record<string, any> = { token: message.token };
+          if (message.user) updates.user = message.user;
+          if (message.teamId) updates.teamId = message.teamId;
+          if (message.apiUrl) updates.apiUrl = message.apiUrl;
+          if (message.webUrl) updates.webUrl = message.webUrl;
+          await chrome.storage.local.set(updates);
           sendResponse({ success: true });
         } else {
           sendResponse({ success: false, error: 'Invalid token payload' });

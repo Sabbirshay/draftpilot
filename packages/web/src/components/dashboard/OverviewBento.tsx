@@ -33,8 +33,36 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
       return;
     }
 
+    // 1. Try server metrics endpoint (bypasses RLS limits and aggregates both usage and draft_history)
     try {
-      // 1. Fetch team quota and plan
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
+
+      if (token) {
+        const queryParams = new URLSearchParams();
+        if (dateRange?.startDate) queryParams.set('startDate', dateRange.startDate);
+        if (dateRange?.endDate) queryParams.set('endDate', dateRange.endDate);
+
+        const url = `/api/dashboard/metrics${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const m = await res.json();
+          if (m.draftsCount !== undefined && m.draftsCount !== null) setDraftsCount(m.draftsCount);
+          if (m.monthlyLimit) setMonthlyLimit(m.monthlyLimit);
+          if (m.macrosCount !== undefined && m.macrosCount !== null) setMacrosCount(m.macrosCount);
+          if (m.teamPlan) setTeamPlan(m.teamPlan);
+          setLoadingStats(false);
+          return;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Dashboard metrics API note, falling back to direct query:', apiErr);
+    }
+
+    try {
+      // 2. Direct Supabase query fallback
       const { data: teamData } = await supabase
         .from('teams')
         .select('id, monthly_draft_limit, plan')
@@ -46,7 +74,7 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
         if (teamData.plan) setTeamPlan(teamData.plan);
       }
 
-      // 2. Count macros
+      // 3. Count macros
       const { count: macroCount } = await supabase
         .from('macros')
         .select('*', { count: 'exact', head: true })
@@ -56,7 +84,7 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
         setMacrosCount(macroCount);
       }
 
-      // 3. Count draft history (filtered by dateRange if provided)
+      // 4. Count draft history (filtered by dateRange if provided)
       let draftQuery = supabase
         .from('draft_history')
         .select('*', { count: 'exact', head: true })
@@ -81,12 +109,17 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
     }
   }, [dbUser, user, dateRange?.startDate, dateRange?.endDate]);
 
-  // Initial fetch and Supabase Realtime Channels
+  // Initial fetch, auto-sync polling, and Supabase Realtime Channels
   useEffect(() => {
     fetchRealMetrics();
 
+    // Periodic auto-sync every 8 seconds to guarantee live cross-party synchronization
+    const syncInterval = setInterval(fetchRealMetrics, 8000);
+
     const teamId = dbUser?.team_id || (dbUser as any)?.teams?.id || user?.id;
-    if (!teamId) return;
+    if (!teamId) {
+      return () => clearInterval(syncInterval);
+    }
 
     // Realtime channel for live cross-party synchronization
     const channel = supabase
@@ -149,6 +182,7 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
       .subscribe();
 
     return () => {
+      clearInterval(syncInterval);
       supabase.removeChannel(channel);
     };
   }, [dbUser, user, fetchRealMetrics]);

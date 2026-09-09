@@ -27,7 +27,9 @@
     "*://mail.google.com/*",
     "*://localhost/*",
     "*://127.0.0.1/*",
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://*.supabase.co/*",
+    "https://openrouter.ai/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -52,6 +54,6 @@
     "default_path": "src/sidepanel/index.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://*.supabase.co https://draftpilot-web.vercel.app http://localhost:* http://127.0.0.1:*;"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://draftpilot-web.vercel.app http://localhost:* http://127.0.0.1:* https://openrouter.ai https://api.openrouter.ai;"
   }
 }

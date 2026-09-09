@@ -374,6 +374,26 @@ function synthesizeSmartSupportDraft(
 // In-memory sliding-window rate limiter (20 requests / 60 seconds per user)
 const userRequestTimestamps = new Map<string, number[]>();
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-passkey, x-requested-with, x-vercel-protection-bypass, x-agent-bypass-token',
+  'Access-Control-Max-Age': '86400',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
+
+function jsonResponse(data: any, init?: ResponseInit) {
+  const headers = new Headers(init?.headers);
+  Object.entries(corsHeaders).forEach(([k, v]) => headers.set(k, v));
+  return NextResponse.json(data, { ...init, headers });
+}
+
 export async function POST(req: NextRequest) {
   // 1. Authenticate Caller
   let user: any = null;
@@ -388,13 +408,13 @@ export async function POST(req: NextRequest) {
   if (!user) {
     const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized: Missing token' }, { status: 401 });
+      return jsonResponse({ error: 'Unauthorized: Missing token' }, { status: 401 });
     }
 
     const token = authHeader.replace('Bearer ', '').trim();
     const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !authData?.user) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid token' }, { status: 401 });
+      return jsonResponse({ error: 'Unauthorized: Invalid token' }, { status: 401 });
     }
 
     user = authData.user;
@@ -411,7 +431,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (bannedEntry) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           error: 'Account deactivated. Please contact support.',
           banned: true,
@@ -438,7 +458,7 @@ export async function POST(req: NextRequest) {
 
     const timestamps = (userRequestTimestamps.get(user.id) || []).filter((t) => now - t < 60000);
     if (timestamps.length >= 20) {
-      return NextResponse.json(
+      return jsonResponse(
         { error: 'Too Many Requests: Rate limit exceeded (max 20 drafts/min). Please slow down.' },
         { status: 429 }
       );
@@ -524,7 +544,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (currentDraftsUsed >= monthlyLimit) {
-        return NextResponse.json(
+        return jsonResponse(
           {
             error: `Monthly draft limit reached for this workspace (${currentDraftsUsed}/${monthlyLimit} used). Please upgrade your plan.`,
             quotaExceeded: true,
@@ -861,7 +881,7 @@ CRITICAL INSTRUCTIONS:
       }
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       draft: scrubbedDraftText,
       macroUsed: matchedMacro?.name || null,
       confidence: matchedMacro ? 96 : (openRouterSuccess ? 92 : 88),
@@ -869,9 +889,10 @@ CRITICAL INSTRUCTIONS:
       customerName: customerName || 'there',
       modelUsed: openRouterSuccess ? actualModelUsed : undefined,
       isFallback: openRouterSuccess ? actualModelUsed !== activeModel : (!openRouterSuccess && !matchedMacro?.content),
+      draftRecorded: !isTestMode && Boolean(teamId),
       ...(notice ? { notice } : {}),
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return jsonResponse({ error: err.message }, { status: 500 });
   }
 }

@@ -22,15 +22,55 @@ export function applyDomAttributes(): void {
   }
 }
 
+/**
+ * Syncs authenticated session credentials from web dashboard to extension storage.
+ */
+export function syncWebAuthToExtension(): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const token = localStorage.getItem('draftpilot_token');
+    const userStr = localStorage.getItem('draftpilot_user');
+    let user: any = null;
+    if (userStr) {
+      try {
+        user = JSON.parse(userStr);
+      } catch {
+        // Ignore parse error
+      }
+    }
+    const teamId = user?.team_id || (user as any)?.teams?.id || null;
+    const webUrl = window.location.origin.replace(/\/$/, '');
+
+    if (token && chrome?.runtime?.sendMessage) {
+      chrome.runtime
+        .sendMessage({
+          type: 'SET_AUTH_TOKEN',
+          token,
+          user,
+          teamId,
+          webUrl,
+        })
+        .catch(() => {});
+    }
+  } catch {
+    // Ignore in sandboxed or testing contexts
+  }
+}
+
 // 1. Instant Synchronous DOM Handshake at document_start
 applyDomAttributes();
+syncWebAuthToExtension();
 
 // 2. Re-apply on DOMContentLoaded to guarantee attributes persist across Next.js / React hydration
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyDomAttributes);
+    document.addEventListener('DOMContentLoaded', () => {
+      applyDomAttributes();
+      syncWebAuthToExtension();
+    });
   } else {
     applyDomAttributes();
+    syncWebAuthToExtension();
   }
 }
 
@@ -43,6 +83,7 @@ if (typeof window !== 'undefined') {
     if (event.data.type === 'DRAFTPILOT_EXTENSION_PING') {
       // Re-apply DOM attributes upon receiving PING
       applyDomAttributes();
+      syncWebAuthToExtension();
       window.postMessage(
         {
           source: 'draftpilot-extension',
@@ -54,6 +95,15 @@ if (typeof window !== 'undefined') {
         },
         '*'
       );
+    } else if (event.data.type === 'DRAFTPILOT_AUTH_CHANGED') {
+      syncWebAuthToExtension();
+    }
+  });
+
+  // Re-sync on localStorage changes (e.g. login / logout in web app)
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'draftpilot_token' || event.key === 'draftpilot_user') {
+      syncWebAuthToExtension();
     }
   });
 
