@@ -53,11 +53,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    if (!teamId && body.teamId) {
-      teamId = String(body.teamId).trim();
+    if (!teamId && (body.teamId || body.team_id)) {
+      teamId = String(body.teamId || body.team_id).trim();
     }
-    if (!userId && body.userId) {
-      userId = String(body.userId).trim();
+    if (!userId && (body.userId || body.user_id)) {
+      userId = String(body.userId || body.user_id).trim();
     }
 
     if (!teamId) {
@@ -73,7 +73,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (!teamId) {
-      return jsonResponse({ error: 'Missing team_id for draft tracking' }, { status: 400 });
+      // Robust fallback to primary team if not specified so telemetry is never dropped
+      const { data: defaultTeam } = await supabaseAdmin
+        .from('teams')
+        .select('id')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      teamId = defaultTeam?.id || null;
+    }
+
+    if (!teamId) {
+      return jsonResponse({ error: 'No team available for draft tracking' }, { status: 400 });
     }
 
     const threadSnippet = String(body.threadSnippet || body.thread_snippet || '').slice(0, 200);
