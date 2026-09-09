@@ -197,10 +197,21 @@ export default function AdminSidebar({
       <div className="pt-6 border-t border-border/50 mt-6 space-y-2">
         <button
           onClick={handleLockConsole}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors text-left"
         >
           <span>🔒</span>
           <span>Lock Admin Console</span>
+        </button>
+        <button
+          onClick={async () => {
+            sessionStorage.removeItem('draftpilot_admin_unlocked');
+            await signOut();
+            window.location.href = '/login';
+          }}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left"
+        >
+          <span>🚪</span>
+          <span>Sign Out / Switch Account</span>
         </button>
         <Link
           href="/dashboard"

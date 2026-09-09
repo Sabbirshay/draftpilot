@@ -69,4 +69,23 @@ describe('Extension Name Extraction & Greeting Normalization', () => {
     const result = cleanAiDraft(raw, 'there');
     assert.strictEqual(result, 'Hi there,\n\nThank you for reaching out to DraftPilot!');
   });
+
+  test('extractSenderName: strips trailing period from abbreviated names like Md.', () => {
+    const input = 'From: Md. Rony Khan <user@example.com>\n\nHi team,';
+    const result = extractSenderName(input);
+    assert.strictEqual(result, 'Md');
+  });
+
+  test('cleanAiDraft: prevents duplicate greeting when name ends in period or comma', () => {
+    const raw = 'Hi Md.,\n\nThank you for contacting us today.';
+    const result = cleanAiDraft(raw, 'Md');
+    assert.strictEqual(result, 'Hi Md,\n\nThank you for contacting us today.');
+  });
+
+  test('cleanAiDraft: cleans multi-stacked duplicated greetings', () => {
+    const raw = 'Hi Md.,Md.,\n\nThank you for reaching out.';
+    const result = cleanAiDraft(raw, 'Md');
+    assert.strictEqual(result, 'Hi Md,\n\nThank you for reaching out.');
+  });
 });
+

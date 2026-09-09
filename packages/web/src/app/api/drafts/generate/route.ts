@@ -139,14 +139,17 @@ function cleanAiDraft(rawText: string, customerName = 'there'): string {
     .replace(/{{agent_name}}/gi, defaultSignoff);
 
   // 8. Greeting Normalization
-  if (customerName && customerName.toLowerCase() !== 'there') {
-    text = text.replace(
-      /^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b(?:[,\t ]+(?:(?:(?:mr|mrs|ms|miss|dr|prof)\.?\s+)?[A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*(?:[-'· \t][A-Z\u00C0-\u024F][A-Za-z\u00C0-\u024F]*)*|\[[^\]]+\]|there|customer|user|client)(?=[\t ]*[,!:]|[\r\n]|$))?[\t ]*[,!:]?/im,
-      `Hi ${customerName},`
-    );
+  const cleanName = customerName ? customerName.replace(/[.,:;!?]+$/, '').trim() : '';
+  if (cleanName && cleanName.toLowerCase() !== 'there') {
+    const lineMatch = text.match(/^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b[^\n]*/i);
+    if (lineMatch && lineMatch[0].length < 60 && !/[.!?]\s+[A-Z]/.test(lineMatch[0])) {
+      text = text.replace(/^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b[^\n]*/i, `Hi ${cleanName},`);
+    } else {
+      text = text.replace(/^(?:Hi|Hello|Dear|Hey|Good\s+(?:morning|afternoon|evening)|Greetings)\b[^\n,!:?]*[.,:;!?]*/im, `Hi ${cleanName},`);
+    }
   } else {
-    text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Name\],/im, 'Hi there,');
-    text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+\[Customer\],/im, 'Hi there,');
+    text = text.replace(/^(?:Hi|Hello|Dear|Hey)\s+(?:\[(?:Name|Customer)\]|there)[.,:;!?]*/im, 'Hi there,');
+    text = text.replace(/^(?:Hi|Hello|Dear|Hey),/im, 'Hi there,');
   }
 
   return text;
@@ -173,6 +176,7 @@ const SALUTATION_BLACKLIST = [
   'please',
   'whom',
   'whomever',
+  'party',
   'friend',
   'member',
   'anyone',
@@ -211,8 +215,8 @@ function extractSenderName(text: string): string {
   if (fromMatch && fromMatch[1].trim()) {
     const clean = fromMatch[1].replace(/["']/g, '').trim();
     if (clean && !clean.toLowerCase().includes('redacted')) {
-      const candidate = clean.split(' ')[0];
-      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+      const candidate = clean.split(' ')[0].replace(/[.,:;!?]+$/, '').trim();
+      if (candidate && !SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
         return candidate;
       }
     }
@@ -220,22 +224,23 @@ function extractSenderName(text: string): string {
   if (lineAngleMatch && lineAngleMatch[1].trim()) {
     const clean = lineAngleMatch[1].trim();
     if (!clean.toLowerCase().startsWith('subject')) {
-      const candidate = clean.split(' ')[0];
-      if (!SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
+      const candidate = clean.split(' ')[0].replace(/[.,:;!?]+$/, '').trim();
+      if (candidate && !SALUTATION_BLACKLIST.includes(candidate.toLowerCase())) {
         return candidate;
       }
     }
   }
   if (signMatch && signMatch[1]) {
-    const clean = signMatch[1].trim();
-    if (!SALUTATION_BLACKLIST.includes(clean.toLowerCase())) {
+    const clean = signMatch[1].replace(/[.,:;!?]+$/, '').trim();
+    if (clean && !SALUTATION_BLACKLIST.includes(clean.toLowerCase())) {
       return clean;
     }
   }
   if (greetMatch && greetMatch[1]) {
-    const candidate = greetMatch[1].trim();
+    const rawCandidate = greetMatch[1].trim();
+    const candidate = rawCandidate.replace(/[.,:;!?]+$/, '').trim();
     const normalized = candidate.replace(/\s*[/]\s*/, '/').toLowerCase();
-    if (!SALUTATION_BLACKLIST.includes(normalized)) {
+    if (candidate && !SALUTATION_BLACKLIST.includes(normalized)) {
       return candidate;
     }
   }
@@ -732,7 +737,7 @@ CRITICAL INSTRUCTIONS:
               requestBody.reasoning = { max_tokens: 0 };
             }
 
-            const timeoutMs = isReasoningMandatory(modelToTry) ? 20000 : 10000;
+            const timeoutMs = isReasoningMandatory(modelToTry) ? 35000 : 25000;
             const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
               method: 'POST',
               headers: {

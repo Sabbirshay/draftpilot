@@ -398,11 +398,30 @@ export async function middleware(
   }
 
   // 2. Enforce BotID check for general public traffic
-  const botResult = options?.checkBotIdFn
-    ? await options.checkBotIdFn()
-    : await checkBotId();
+  let botResult: any = { isBot: false, isHuman: true };
 
-  if (botResult.isBot) {
+  // If a mock or custom check function is provided (e.g. in test suites), invoke it directly
+  if (options?.checkBotIdFn) {
+    botResult = await options.checkBotIdFn();
+  } else {
+    // For real production traffic, allow standard browser document GET requests to render the page
+    const isDocumentRequest =
+      request.method === "GET" &&
+      (request.headers.get("accept")?.includes("text/html") ||
+        request.headers.get("sec-fetch-dest") === "document" ||
+        request.headers.get("upgrade-insecure-requests") === "1");
+
+    if (!isDocumentRequest) {
+      try {
+        botResult = await checkBotId();
+      } catch {
+        // If BotID is not provisioned or service fails, fail open to avoid locking out real users
+        botResult = { isBot: false, isHuman: true };
+      }
+    }
+  }
+
+  if (botResult?.isBot) {
     return NextResponse.json(
       {
         error: "bot_detected",
