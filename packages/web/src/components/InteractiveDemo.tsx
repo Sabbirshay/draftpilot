@@ -208,7 +208,7 @@ export function InteractiveDemo() {
             }`}>
               <div className="flex items-center justify-between text-xs mb-2">
                 <span className="font-semibold text-text">Suggested Reply</span>
-                <span className="text-[10px] text-text-dim">GPT-4o Mini (0.4s)</span>
+                <span className="text-[10px] text-accent-light bg-accent/10 px-2 py-0.5 rounded border border-accent/20">DraftPilot Cascade (0.3s)</span>
               </div>
 
               <div className="text-[11px] text-text-muted leading-relaxed mb-3 max-h-28 overflow-hidden font-sans">

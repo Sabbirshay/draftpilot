@@ -87,17 +87,32 @@ export default function Hero() {
         {/* Jitter-style Interactive Live Demo Showcase */}
         <InteractiveDemo />
 
-        {/* Social Proof Logo Marquee / Trust Bar */}
+        {/* Architectural Trust & Compliance Bar */}
         <div className="mt-8 pt-8 border-t border-border/40 w-full max-w-4xl">
           <p className="text-xs uppercase tracking-widest text-text-dim font-semibold mb-6">
-            Loved by support agents, CX leads &amp; solo founders
+            Engineered for privacy, reliability &amp; speed
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-8 md:gap-12 opacity-60 grayscale hover:grayscale-0 transition-all">
-            <span className="font-bold text-sm tracking-wider text-text-muted">FOODI OPS</span>
-            <span className="font-bold text-sm tracking-wider text-text-muted">HELPFLOW</span>
-            <span className="font-bold text-sm tracking-wider text-text-muted">SCALEBYTE</span>
-            <span className="font-bold text-sm tracking-wider text-text-muted">RESOLVEAI</span>
-            <span className="font-bold text-sm tracking-wider text-text-muted">TICKETLESS</span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
+            <div className="flex flex-col items-center p-3 rounded-2xl bg-elevated/40 border border-border/50 text-center">
+              <span className="text-accent-light text-base mb-1">🛡️</span>
+              <span className="text-xs font-semibold text-text">Pre-Flight PII Redaction</span>
+              <span className="text-[10px] text-text-dim mt-0.5">Scrubbed locally in browser</span>
+            </div>
+            <div className="flex flex-col items-center p-3 rounded-2xl bg-elevated/40 border border-border/50 text-center">
+              <span className="text-cyan text-base mb-1">⚡</span>
+              <span className="text-xs font-semibold text-text">7-Tier AI Cascade</span>
+              <span className="text-[10px] text-text-dim mt-0.5">&lt;300ms reply generation</span>
+            </div>
+            <div className="flex flex-col items-center p-3 rounded-2xl bg-elevated/40 border border-border/50 text-center">
+              <span className="text-emerald-400 text-base mb-1">🔒</span>
+              <span className="text-xs font-semibold text-text">Zero Model Training</span>
+              <span className="text-[10px] text-text-dim mt-0.5">Your data stays your data</span>
+            </div>
+            <div className="flex flex-col items-center p-3 rounded-2xl bg-elevated/40 border border-border/50 text-center">
+              <span className="text-purple-400 text-base mb-1">📩</span>
+              <span className="text-xs font-semibold text-text">Native Gmail MV3</span>
+              <span className="text-[10px] text-text-dim mt-0.5">No new inbox software</span>
+            </div>
           </div>
         </div>
       </div>

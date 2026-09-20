@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 
 export default function Footer() {
   return (
@@ -26,10 +27,10 @@ export default function Footer() {
           <div className="space-y-2.5">
             <p className="font-bold text-text uppercase tracking-wider text-[10px]">Product</p>
             <ul className="space-y-2">
-              <li><a href="#how-it-works" className="hover:text-text transition-colors">How it works</a></li>
-              <li><a href="#features" className="hover:text-text transition-colors">Features</a></li>
-              <li><a href="#pricing" className="hover:text-text transition-colors">Pricing</a></li>
-              <li><a href="#comparison" className="hover:text-text transition-colors">Compare</a></li>
+              <li><a href="/#how-it-works" className="hover:text-text transition-colors">How it works</a></li>
+              <li><a href="/#features" className="hover:text-text transition-colors">Features</a></li>
+              <li><a href="/#pricing" className="hover:text-text transition-colors">Pricing</a></li>
+              <li><a href="/#comparison" className="hover:text-text transition-colors">Compare</a></li>
             </ul>
           </div>
 
@@ -46,10 +47,10 @@ export default function Footer() {
           <div className="space-y-2.5">
             <p className="font-bold text-text uppercase tracking-wider text-[10px]">Legal &amp; Privacy</p>
             <ul className="space-y-2">
-              <li><a href="#" className="hover:text-text transition-colors">Privacy Policy</a></li>
-              <li><a href="#" className="hover:text-text transition-colors">Terms of Service</a></li>
-              <li><a href="#" className="hover:text-text transition-colors">PII Architecture</a></li>
-              <li><a href="#" className="hover:text-text transition-colors">Security Overview</a></li>
+              <li><Link href="/privacy" className="hover:text-text transition-colors">Privacy Policy</Link></li>
+              <li><Link href="/terms" className="hover:text-text transition-colors">Terms of Service</Link></li>
+              <li><Link href="/pii-architecture" className="hover:text-text transition-colors">PII Architecture</Link></li>
+              <li><Link href="/security" className="hover:text-text transition-colors">Security Overview</Link></li>
             </ul>
           </div>
         </div>
