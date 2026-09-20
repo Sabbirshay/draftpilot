@@ -2,7 +2,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { scrubPII } from '../pii-scrubber.ts';
-import { extractSenderName, cleanAiDraft } from '../../../../extension/src/utils/api-client.ts';
+import { extractSenderName, cleanAiDraft } from '../draft-utils.ts';
 
 describe('DraftPilot AI Draft Pipeline: Honesty, Name Extraction & LLM Quality', () => {
   // ==========================================================================

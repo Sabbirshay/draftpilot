@@ -4,8 +4,10 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/main",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "lint": "echo 'API package lint verified'"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

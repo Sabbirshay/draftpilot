@@ -70,26 +70,17 @@ export async function getActiveRootPasskey(): Promise<string | null> {
   }
 
   try {
-    const fetchDbPasskey = async () => {
-      const { data, error } = await supabaseAdmin
-        .from('platform_settings')
-        .select('root_passkey')
-        .limit(1)
-        .maybeSingle();
+    const { data, error } = await supabaseAdmin
+      .from('platform_settings')
+      .select('root_passkey')
+      .limit(1)
+      .maybeSingle();
 
-      if (!error && data?.root_passkey && typeof data.root_passkey === 'string' && data.root_passkey.trim()) {
-        return data.root_passkey.trim();
-      }
-      return null;
-    };
-
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 150));
-    const dbPasskey = await Promise.race([fetchDbPasskey(), timeoutPromise]);
-
-    if (dbPasskey) {
-      cachedDbPasskey = dbPasskey;
+    if (!error && data?.root_passkey && typeof data.root_passkey === 'string' && data.root_passkey.trim()) {
+      const trimmed = data.root_passkey.trim();
+      cachedDbPasskey = trimmed;
       cacheTimestamp = now;
-      return dbPasskey;
+      return trimmed;
     }
   } catch {
     // Fall through to environment variables on database query error
@@ -166,7 +157,7 @@ export async function verifySuperAdmin(req: Request): Promise<AdminAuthResult> {
       .eq('id', user.id)
       .single();
 
-    if (dbUser?.role === 'superadmin' || dbUser?.role === 'admin') {
+    if (dbUser?.role === 'superadmin') {
       isSuperadmin = true;
     }
   }

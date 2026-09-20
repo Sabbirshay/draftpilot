@@ -2,7 +2,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { scrubPII, DEFAULT_PII_WHITELIST } from '../pii-scrubber.ts';
-import { cleanAiDraft, extractSenderName, synthesizeSmartSupportDraft } from '../../../../extension/src/utils/api-client.ts';
+import { cleanAiDraft, extractSenderName, synthesizeSmartSupportDraft } from '../draft-utils.ts';
 
 // ============================================================================
 // CHALLENGE SUITE 1: Multi-Alias Instruction Parsing Across All Combinations

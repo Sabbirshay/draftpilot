@@ -117,7 +117,7 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
             chunksCount: d.chunks_count || 1,
             extractedMacrosCount: Math.max(1, Math.round((d.chunks_count || 3) / 2)),
             uploadedAt: d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recently',
-            status: 'Indexed & Ready',
+            status: d.status === 'ready' ? 'Indexed & Ready' : 'Processing',
           }))
         );
       }
@@ -208,6 +208,13 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
 
     const fileSizeStr = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
 
+    if (['pdf', 'docx', 'doc'].includes(ext)) {
+      setUploadStatus(`⚠️ Binary formats (${ext.toUpperCase()}) cannot be parsed client-side. Please upload as .txt, .md, .csv, or .xlsx.`);
+      setIsUploading(false);
+      return;
+    }
+
+    let docId: string | null = null;
     try {
       const isSpreadsheet = ['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
 
@@ -336,7 +343,7 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
         ? spreadsheetMacros.slice(0, 10)
         : extractMacrosFromText(file.name, fileText);
 
-      // Insert document record in Supabase
+      // Insert document record in Supabase with 'processing' status
       const { data: docData, error: docErr } = await supabase
         .from('knowledge_documents')
         .insert({
@@ -344,13 +351,14 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
           name: file.name,
           file_type: fileType,
           file_size: fileSizeStr,
-          chunks_count: Math.max(1, extractedMacros.length * 2),
-          status: 'ready',
+          chunks_count: 0,
+          status: 'processing',
         })
         .select()
         .single();
 
       if (docErr) throw docErr;
+      docId = docData.id;
 
       // Insert extracted macros into Supabase
       if (extractedMacros.length > 0) {
@@ -366,75 +374,118 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
       }
 
       // Chunk full document text and store in document_chunks for RAG knowledge grounding
+      let chunksCount = 0;
       if (fileText && fileText.trim().length > 20) {
-        try {
-          const chunks: { document_id: string; team_id: string; chunk_text: string; chunk_index: number }[] = [];
+        const chunks: { document_id: string; team_id: string; chunk_text: string; chunk_index: number }[] = [];
 
-          // For spreadsheets, chunk by logical row blocks rather than paragraph splits
-          if (isSpreadsheet) {
-            // Split on double newlines (row separators) for more meaningful chunks
-            const sections = fileText.split(/\n\n+/);
-            let chunkIdx = 0;
-            let currentChunk = '';
+        // For spreadsheets, chunk by logical row blocks rather than paragraph splits
+        if (isSpreadsheet) {
+          const sections = fileText.split(/\n\n+/);
+          let chunkIdx = 0;
+          let currentChunk = '';
 
-            for (const section of sections) {
-              const trimmed = section.trim();
-              if (!trimmed) continue;
+          for (const section of sections) {
+            const trimmed = section.trim();
+            if (!trimmed) continue;
 
-              // Accumulate sections into chunks of ~800 chars max for better retrieval
-              if (currentChunk.length + trimmed.length > 800 && currentChunk.length > 20) {
-                chunks.push({
-                  document_id: docData.id,
-                  team_id: teamId,
-                  chunk_text: currentChunk.trim().slice(0, 1000),
-                  chunk_index: chunkIdx++,
-                });
-                currentChunk = trimmed;
-              } else {
-                currentChunk += (currentChunk ? '\n\n' : '') + trimmed;
-              }
-            }
-
-            // Push remaining content
-            if (currentChunk.trim().length > 20) {
+            if (currentChunk.length + trimmed.length > 800 && currentChunk.length > 20) {
               chunks.push({
                 document_id: docData.id,
                 team_id: teamId,
-                chunk_text: currentChunk.trim().slice(0, 1000),
+                chunk_text: currentChunk.trim(),
                 chunk_index: chunkIdx++,
               });
+              currentChunk = trimmed;
+            } else {
+              currentChunk += (currentChunk ? '\n\n' : '') + trimmed;
             }
-          } else {
-            // Original paragraph-based chunking for text documents
-            const paragraphs = fileText.split(/\n\s*\n/);
-            let chunkIdx = 0;
+          }
 
-            for (const para of paragraphs) {
-              const cleanPara = para.trim();
-              if (cleanPara.length > 20) {
-                chunks.push({
-                  document_id: docData.id,
-                  team_id: teamId,
-                  chunk_text: cleanPara.slice(0, 1000),
-                  chunk_index: chunkIdx++,
-                });
+          if (currentChunk.trim().length > 20) {
+            chunks.push({
+              document_id: docData.id,
+              team_id: teamId,
+              chunk_text: currentChunk.trim(),
+              chunk_index: chunkIdx++,
+            });
+          }
+        } else {
+          // Text/Markdown chunking: split by paragraphs and sentences without mid-word cuts
+          const paragraphs = fileText.split(/\n\s*\n/);
+          let chunkIdx = 0;
+          let currentChunk = '';
+
+          for (const para of paragraphs) {
+            const cleanPara = para.trim();
+            if (!cleanPara) continue;
+
+            if (cleanPara.length > 1000) {
+              const sentences = cleanPara.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [cleanPara];
+              for (const sentence of sentences) {
+                const cleanSentence = sentence.trim();
+                if (!cleanSentence) continue;
+                if (currentChunk.length + cleanSentence.length > 800 && currentChunk.length > 20) {
+                  chunks.push({
+                    document_id: docData.id,
+                    team_id: teamId,
+                    chunk_text: currentChunk.trim(),
+                    chunk_index: chunkIdx++,
+                  });
+                  currentChunk = cleanSentence;
+                } else {
+                  currentChunk += (currentChunk ? ' ' : '') + cleanSentence;
+                }
               }
+            } else if (currentChunk.length + cleanPara.length > 800 && currentChunk.length > 20) {
+              chunks.push({
+                document_id: docData.id,
+                team_id: teamId,
+                chunk_text: currentChunk.trim(),
+                chunk_index: chunkIdx++,
+              });
+              currentChunk = cleanPara;
+            } else {
+              currentChunk += (currentChunk ? '\n\n' : '') + cleanPara;
             }
           }
 
-          if (chunks.length > 0) {
-            await supabase.from('document_chunks').insert(chunks);
+          if (currentChunk.trim().length > 20) {
+            chunks.push({
+              document_id: docData.id,
+              team_id: teamId,
+              chunk_text: currentChunk.trim(),
+              chunk_index: chunkIdx++,
+            });
           }
-        } catch (chunkErr) {
-          console.warn('Chunk indexing note:', chunkErr);
+        }
+
+        if (chunks.length > 0) {
+          const { error: chunkErr } = await supabase.from('document_chunks').insert(chunks);
+          if (chunkErr) {
+            console.error('Failed to insert document chunks:', chunkErr);
+            throw chunkErr;
+          }
+          chunksCount = chunks.length;
         }
       }
+
+      // Mark document as ready now that chunking and macro extraction completed successfully
+      await supabase
+        .from('knowledge_documents')
+        .update({
+          status: 'ready',
+          chunks_count: Math.max(chunksCount, extractedMacros.length * 2, 1),
+        })
+        .eq('id', docData.id);
 
       setUploadStatus(`✓ Successfully indexed ${file.name} and created ${extractedMacros.length} support macros!`);
       await loadDocuments();
       onExtractionComplete?.(extractedMacros.length);
     } catch (err: any) {
       console.error('File upload error:', err);
+      if (docId) {
+        await supabase.from('knowledge_documents').update({ status: 'error' }).eq('id', docId);
+      }
       setUploadStatus(`⚠️ Upload note: ${err.message || 'File processed'}`);
     } finally {
       setIsUploading(false);
@@ -485,7 +536,7 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
           <span>{isUploading ? 'Extracting & Indexing...' : 'Browse Document Files'}</span>
           <input
             type="file"
-            accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.md,.txt,.json"
+            accept=".xlsx,.xls,.csv,.tsv,.md,.txt,.json"
             className="hidden"
             disabled={isUploading}
             onChange={(e) => {
@@ -502,7 +553,7 @@ export default function DocumentUploader({ onExtractionComplete }: DocumentUploa
         )}
 
         <p className="text-[11px] text-text-dim mt-4">
-          Supported formats: Markdown, Plain Text, CSV, JSON, PDF, DOCX (up to 25MB each)
+          Supported formats: Spreadsheet (.xlsx, .csv), Markdown (.md), Plain Text (.txt), JSON (.json) (up to 25MB each)
         </p>
       </div>
 

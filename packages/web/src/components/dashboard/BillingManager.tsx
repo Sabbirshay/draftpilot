@@ -96,7 +96,6 @@ export default function BillingManager() {
   const handleOpenPortal = async () => {
     setIsLoadingPortal(true);
     setPortalNotice(null);
-    const cadence = isAnnual ? 'yearly' : 'monthly';
 
     if (isFreePlan) {
       setShowUpgradeModal(true);
@@ -114,32 +113,23 @@ export default function BillingManager() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ cadence }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) {
-          window.location.href = data.url;
-          return;
-        }
+      const data = await res.json();
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to open customer billing portal');
       }
-    } catch (e) {
-      console.warn('Stripe portal endpoint dispatch:', e);
-    }
 
-    setPortalNotice({
-      type: 'info',
-      message: `Connecting to Stripe Customer Billing Portal (${cadence})...`,
-    });
-
-    setTimeout(() => {
+      window.location.href = data.url;
+    } catch (e: any) {
+      console.error('Stripe portal error:', e);
       setPortalNotice({
-        type: 'success',
-        message: `✓ Stripe Billing session initialized (${cadence}). In production with live Stripe credentials, this redirects to your Stripe Hosted Billing Portal.`,
+        type: 'error',
+        message: `Unable to open billing portal: ${e.message || 'Please ensure you have an active subscription'}.`,
       });
+    } finally {
       setIsLoadingPortal(false);
-    }, 600);
+    }
   };
 
   const handleConfirmUpgrade = async () => {
@@ -148,44 +138,34 @@ export default function BillingManager() {
     const cadence = isAnnual ? 'yearly' : 'monthly';
 
     try {
-      const activeTeamId = dbUser?.team_id;
-      const targetQuota = selectedTier === 'enterprise' ? 5000 : selectedSeats * 1000;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || (typeof window !== 'undefined' ? localStorage.getItem('draftpilot_token') : null);
 
-      if (activeTeamId) {
-        // First try with billing_cadence
-        const { error } = await supabase
-          .from('teams')
-          .update({
-            plan: selectedTier,
-            monthly_draft_limit: targetQuota,
-            billing_cadence: cadence,
-          })
-          .eq('id', activeTeamId);
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          cadence,
+          tier: selectedTier,
+          seats: selectedSeats,
+        }),
+      });
 
-        if (error) {
-          // Fallback if column does not exist
-          await supabase
-            .from('teams')
-            .update({
-              plan: selectedTier,
-              monthly_draft_limit: targetQuota,
-            })
-            .eq('id', activeTeamId);
-        }
+      const data = await res.json();
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to create checkout session');
       }
 
-      setLivePlan(selectedTier);
-      setCustomQuota(targetQuota);
       setShowUpgradeModal(false);
-      setPortalNotice({
-        type: 'success',
-        message: `🎉 Workspace upgraded to ${selectedTier === 'enterprise' ? 'Enterprise' : 'Team'} Plan (${cadence === 'yearly' ? 'Annual - 20% savings' : 'Monthly'}, ${selectedTier === 'enterprise' ? '5,000+' : `${selectedSeats} seat${selectedSeats > 1 ? 's' : ''}, ${targetQuota.toLocaleString()}`} monthly drafts)!`,
-      });
+      window.location.href = data.url;
     } catch (err: any) {
-      console.error('Failed to upgrade workspace plan:', err);
+      console.error('Failed to initiate checkout session:', err);
       setPortalNotice({
         type: 'error',
-        message: `Could not complete plan upgrade: ${err.message || 'Network error'}. Please try again.`,
+        message: `Could not initiate checkout: ${err.message || 'Network error'}. Please try again.`,
       });
     } finally {
       setIsUpgrading(false);

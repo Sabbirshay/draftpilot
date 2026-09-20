@@ -7,6 +7,7 @@ import {
   type SupportTicketPayload,
   type SupportTicketResponse,
 } from '../../../../lib/support-ticket.ts';
+import { supabaseAdmin } from '../../../../lib/admin-auth.ts';
 
 export type { SupportTicketPayload, SupportTicketResponse };
 
@@ -40,6 +41,22 @@ export async function POST(req: Request): Promise<Response> {
 
     const ticketId = generateTicketId();
     const timestamp = new Date().toISOString();
+
+    // Persist ticket durably into database
+    try {
+      await supabaseAdmin.from('support_tickets').insert({
+        id: ticketId,
+        email: validation.data.email,
+        subject: validation.data.subject,
+        category: validation.data.category || 'other',
+        priority: validation.data.priority || 'medium',
+        message: validation.data.message,
+        status: 'open',
+        created_at: timestamp,
+      });
+    } catch (dbErr) {
+      console.warn('[support/ticket] Database persistence note:', dbErr);
+    }
 
     return Response.json(
       {

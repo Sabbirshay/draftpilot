@@ -90,6 +90,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           return;
         }
+      } else if (res.status === 403 || res.status === 401) {
+        // Account banned or unauthorized - fail closed, do not fall back to direct DB queries
+        setDbUser(null);
+        setOnboardingState(null);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('draftpilot_token');
+          localStorage.removeItem('draftpilot_user');
+          window.postMessage({ type: 'DRAFTPILOT_AUTH_CHANGED' }, '*');
+        }
+        return;
       }
     } catch (err) {
       console.warn('API /api/auth/me profile sync notice:', err);
@@ -260,6 +270,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoading(false);
         }
 
+        if (event === 'TOKEN_REFRESHED' && s) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('draftpilot_token', s.access_token);
+            window.postMessage({ type: 'DRAFTPILOT_AUTH_CHANGED' }, '*');
+          }
+        }
+
         if (event === 'SIGNED_OUT') {
           setDbUser(null);
           setOnboardingState(null);
@@ -267,6 +284,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (typeof window !== 'undefined') {
             localStorage.removeItem('draftpilot_token');
             localStorage.removeItem('draftpilot_user');
+            window.postMessage({ type: 'DRAFTPILOT_AUTH_CHANGED' }, '*');
           }
         }
       }

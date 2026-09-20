@@ -41,13 +41,13 @@ export function syncWebAuthToExtension(): void {
     const teamId = user?.team_id || (user as any)?.teams?.id || null;
     const webUrl = window.location.origin.replace(/\/$/, '');
 
-    if (token && chrome?.runtime?.sendMessage) {
+    if (chrome?.runtime?.sendMessage) {
       chrome.runtime
         .sendMessage({
           type: 'SET_AUTH_TOKEN',
-          token,
-          user,
-          teamId,
+          token: token || null,
+          user: token ? user : null,
+          teamId: token ? teamId : null,
           webUrl,
         })
         .catch(() => {});

@@ -14,6 +14,7 @@
     "build:api": "pnpm --filter @draftpilot/api build",
     "build:web": "pnpm --filter @draftpilot/web build",
     "build:ext": "pnpm --filter @draftpilot/extension build",
+    "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint"
   }

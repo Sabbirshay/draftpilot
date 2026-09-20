@@ -2,7 +2,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { scrubPII, DEFAULT_PII_WHITELIST } from '../pii-scrubber.ts';
-import { cleanAiDraft, synthesizeSmartSupportDraft, extractSenderName } from '../../../../extension/src/utils/api-client.ts';
+import { cleanAiDraft, synthesizeSmartSupportDraft, extractSenderName } from '../draft-utils.ts';
 
 // ============================================================================
 // 1. PROMPT ALIASES RESOLUTION (Feature F18)

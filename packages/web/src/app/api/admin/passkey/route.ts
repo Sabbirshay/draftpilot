@@ -56,28 +56,21 @@ export async function POST(req: Request) {
 
     // 1. Attempt persistent update to database singleton
     try {
-      const fetchExisting = async () => {
-        const { data: existing } = await supabaseAdmin
-          .from('platform_settings')
-          .select('id')
-          .limit(1)
-          .maybeSingle();
-        return existing;
-      };
+      const { data: existing } = await supabaseAdmin
+        .from('platform_settings')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
 
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 150));
-      const existing = await Promise.race([fetchExisting(), timeoutPromise]);
       const id = existing?.id || crypto.randomUUID();
 
-      const upsertPromise = supabaseAdmin
+      await supabaseAdmin
         .from('platform_settings')
         .upsert({
           id,
           root_passkey: cleanedPasskey,
           updated_at: new Date().toISOString(),
         });
-
-      await Promise.race([upsertPromise, new Promise((res) => setTimeout(res, 200))]);
     } catch (dbErr: any) {
       console.warn('[admin/passkey] Database query notice:', dbErr?.message);
     }

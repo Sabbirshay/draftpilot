@@ -49,8 +49,33 @@ const DEFAULT_GLOBAL_MACROS: GlobalMacro[] = [
   },
 ];
 
-// Persistent runtime global catalog
-let globalMacrosCatalog: GlobalMacro[] = [...DEFAULT_GLOBAL_MACROS];
+// Persistent runtime global catalog with database backing
+let inMemoryGlobalMacros: GlobalMacro[] = [...DEFAULT_GLOBAL_MACROS];
+
+async function loadGlobalMacros(): Promise<GlobalMacro[]> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('global_macros')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (!error && data && data.length > 0) {
+      inMemoryGlobalMacros = data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        category: row.category || 'General',
+        tags: Array.isArray(row.tags) ? row.tags : [],
+        content: row.content,
+        adoptionCount: row.adoption_count || 0,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+    }
+  } catch (err) {
+    console.warn('[global-macros] Error loading from database:', err);
+  }
+  return inMemoryGlobalMacros;
+}
 
 export async function GET(req: NextRequest) {
   const auth = await verifySuperAdmin(req);
@@ -58,9 +83,11 @@ export async function GET(req: NextRequest) {
     return auth.response!;
   }
 
+  const macros = await loadGlobalMacros();
+
   return NextResponse.json({
     success: true,
-    macros: globalMacrosCatalog,
+    macros,
   });
 }
 
@@ -75,11 +102,12 @@ export async function POST(req: NextRequest) {
 
     // 1. Broadcast action: distribute macro(s) across all workspaces bypassing client RLS
     if (body.action === 'broadcast') {
+      const currentMacros = await loadGlobalMacros();
       const targetMacros: GlobalMacro[] = body.macro
         ? [body.macro]
         : body.macros && Array.isArray(body.macros)
         ? body.macros
-        : globalMacrosCatalog;
+        : currentMacros;
 
       if (!targetMacros || targetMacros.length === 0) {
         return NextResponse.json({ error: 'No macros available to broadcast' }, { status: 400 });
@@ -145,9 +173,17 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Update adoption count in catalog
+        // Update adoption count in database and catalog
         const teamCount = teams.length;
-        globalMacrosCatalog = globalMacrosCatalog.map((gm) => {
+        for (const tm of targetMacros) {
+          try {
+            await supabaseAdmin
+              .from('global_macros')
+              .update({ adoption_count: teamCount, updated_at: new Date().toISOString() })
+              .eq('id', tm.id);
+          } catch {}
+        }
+        inMemoryGlobalMacros = inMemoryGlobalMacros.map((gm) => {
           const matched = targetMacros.some((tm) => tm.id === gm.id || tm.name === gm.name);
           return matched ? { ...gm, adoptionCount: teamCount } : gm;
         });
@@ -177,7 +213,7 @@ export async function POST(req: NextRequest) {
       : [];
 
     const newMacro: GlobalMacro = {
-      id: body.id || String(Date.now()),
+      id: body.id || crypto.randomUUID(),
       name,
       category: body.category || 'General',
       tags,
@@ -187,12 +223,25 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date().toISOString(),
     };
 
-    globalMacrosCatalog.push(newMacro);
+    try {
+      await supabaseAdmin.from('global_macros').insert({
+        id: newMacro.id,
+        name: newMacro.name,
+        category: newMacro.category,
+        tags: newMacro.tags,
+        content: newMacro.content,
+        adoption_count: 0,
+      });
+    } catch (err) {
+      console.warn('[global-macros] Database insert note:', err);
+    }
+
+    inMemoryGlobalMacros.push(newMacro);
 
     return NextResponse.json({
       success: true,
       macro: newMacro,
-      macros: globalMacrosCatalog,
+      macros: inMemoryGlobalMacros,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -212,7 +261,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Missing macro id' }, { status: 400 });
     }
 
-    const index = globalMacrosCatalog.findIndex((m) => m.id === targetId);
+    const index = inMemoryGlobalMacros.findIndex((m) => m.id === targetId);
     if (index === -1) {
       return NextResponse.json({ error: 'Macro not found' }, { status: 404 });
     }
@@ -223,23 +272,38 @@ export async function PUT(req: NextRequest) {
           : typeof body.tags === 'string'
           ? body.tags.split(',').map((t: string) => t.trim().toLowerCase()).filter(Boolean)
           : [])
-      : globalMacrosCatalog[index].tags;
+      : inMemoryGlobalMacros[index].tags;
 
     const updatedMacro: GlobalMacro = {
-      ...globalMacrosCatalog[index],
-      name: body.name !== undefined ? body.name.trim() : globalMacrosCatalog[index].name,
-      category: body.category !== undefined ? body.category : globalMacrosCatalog[index].category,
+      ...inMemoryGlobalMacros[index],
+      name: body.name !== undefined ? body.name.trim() : inMemoryGlobalMacros[index].name,
+      category: body.category !== undefined ? body.category : inMemoryGlobalMacros[index].category,
       tags,
-      content: body.content !== undefined ? body.content.trim() : globalMacrosCatalog[index].content,
+      content: body.content !== undefined ? body.content.trim() : inMemoryGlobalMacros[index].content,
       updatedAt: new Date().toISOString(),
     };
 
-    globalMacrosCatalog[index] = updatedMacro;
+    try {
+      await supabaseAdmin
+        .from('global_macros')
+        .update({
+          name: updatedMacro.name,
+          category: updatedMacro.category,
+          tags: updatedMacro.tags,
+          content: updatedMacro.content,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', targetId);
+    } catch (err) {
+      console.warn('[global-macros] Database update note:', err);
+    }
+
+    inMemoryGlobalMacros[index] = updatedMacro;
 
     return NextResponse.json({
       success: true,
       macro: updatedMacro,
-      macros: globalMacrosCatalog,
+      macros: inMemoryGlobalMacros,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -267,17 +331,26 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Missing macro id' }, { status: 400 });
     }
 
-    const initialLength = globalMacrosCatalog.length;
-    globalMacrosCatalog = globalMacrosCatalog.filter((m) => m.id !== targetId);
+    const initialLength = inMemoryGlobalMacros.length;
+    inMemoryGlobalMacros = inMemoryGlobalMacros.filter((m) => m.id !== targetId);
 
-    if (globalMacrosCatalog.length === initialLength) {
+    if (inMemoryGlobalMacros.length === initialLength) {
       return NextResponse.json({ error: 'Macro not found' }, { status: 404 });
+    }
+
+    try {
+      await supabaseAdmin
+        .from('global_macros')
+        .delete()
+        .eq('id', targetId);
+    } catch (err) {
+      console.warn('[global-macros] Database delete note:', err);
     }
 
     return NextResponse.json({
       success: true,
       id: targetId,
-      macros: globalMacrosCatalog,
+      macros: inMemoryGlobalMacros,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

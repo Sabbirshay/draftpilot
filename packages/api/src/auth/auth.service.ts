@@ -140,10 +140,11 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const client = this.supabase.getClient();
     
+    const autoConfirm = process.env.NODE_ENV === 'test' || process.env.AUTO_CONFIRM_EMAIL === 'true';
     const { data: authData, error: authError } = await client.auth.admin.createUser({
       email: dto.email,
       password: dto.password,
-      email_confirm: true,
+      email_confirm: autoConfirm,
     });
 
     if (authError) throw new BadRequestException(authError.message);

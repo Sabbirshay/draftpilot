@@ -51,6 +51,9 @@ export class BillingController {
   @UseGuards(AuthGuard)
   @Post('portal')
   async createPortal(@CurrentUser() user: any) {
+    if (user.role !== 'owner' && user.role !== 'admin') {
+      throw new BadRequestException('Only workspace owners and admins can access billing portal');
+    }
     const team = user.teams;
     if (!team?.stripe_customer_id) {
       throw new BadRequestException('No billing account found');

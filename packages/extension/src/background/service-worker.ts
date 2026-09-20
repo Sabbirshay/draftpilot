@@ -42,8 +42,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return (
               u.hostname === 'localhost' ||
               u.hostname === '127.0.0.1' ||
-              u.hostname === 'draftpilot-web.vercel.app' ||
-              u.hostname.endsWith('.vercel.app')
+              u.hostname === 'draftpilot-web.vercel.app'
             );
           } catch {
             return false;

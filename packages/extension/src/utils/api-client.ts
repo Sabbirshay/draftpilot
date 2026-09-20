@@ -889,7 +889,7 @@ export class ApiClient {
     let draftText = '';
     let serverSuccess = false;
     let serverRecorded = false;
-    let draftSource: 'openrouter' | 'macro' | 'template' = 'template';
+    let draftSource: 'openrouter' | 'ai' | 'macro' | 'template' = 'template';
     let draftNotice: string | undefined = undefined;
 
     if (token) {

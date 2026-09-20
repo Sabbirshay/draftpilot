@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
     let freeCount = 0;
     let teamCount = 0;
     let enterpriseCount = 0;
+    let activeStripeCount = 0;
     let totalMRR = 0;
 
     const workspaceSubscriptions = teams.map((t) => {
@@ -46,14 +47,20 @@ export async function GET(req: NextRequest) {
       const seats = Math.max(1, teamUsers.length);
       const owner = teamUsers.find((u) => u.role === 'owner') || teamUsers[0];
       const ownerEmail = owner?.email || 'admin@workspace.io';
+      const hasActiveStripe = Boolean(t.stripe_subscription_id);
+      const cadence = (t.billing_cadence || 'monthly').toLowerCase();
+
+      if (hasActiveStripe) {
+        activeStripeCount++;
+      }
 
       let monthlyValue = 0;
       if (planKey === 'enterprise') {
         enterpriseCount++;
-        monthlyValue = 99;
+        monthlyValue = cadence === 'annual' ? 79 : 99;
       } else if (planKey === 'team') {
         teamCount++;
-        monthlyValue = 19 * seats;
+        monthlyValue = (cadence === 'annual' ? 15 : 19) * seats;
       } else {
         freeCount++;
         monthlyValue = 0;
@@ -61,15 +68,24 @@ export async function GET(req: NextRequest) {
 
       totalMRR += monthlyValue;
 
+      let status = 'Free Tier';
+      if (hasActiveStripe) {
+        status = `Active Stripe (${cadence})`;
+      } else if (planKey !== 'free') {
+        status = 'Active Paid (Direct/Comp)';
+      }
+
       return {
         id: t.id,
         name: t.name || 'Support Workspace',
         ownerEmail,
         plan: planKey,
+        cadence,
         seats,
+        hasActiveStripe,
         monthlyQuota: t.monthly_draft_limit || (planKey === 'free' ? 50 : 1000),
         monthlyValue,
-        status: planKey === 'free' ? 'Free Tier' : 'Active Paid',
+        status,
         createdAt: t.created_at ? new Date(t.created_at).toISOString().split('T')[0] : '2026-08-01',
       };
     });
@@ -84,6 +100,9 @@ export async function GET(req: NextRequest) {
       metrics: {
         totalMRR,
         totalARR,
+        projectedMRR: totalMRR,
+        projectedARR: totalARR,
+        activeStripeSubscriptions: activeStripeCount,
         totalWorkspaces,
         paidWorkspaces,
         freeWorkspaces: freeCount,

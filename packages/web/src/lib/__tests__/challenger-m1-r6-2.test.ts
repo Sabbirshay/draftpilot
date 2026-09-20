@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scrubPII, DEFAULT_PII_WHITELIST } from '../pii-scrubber.ts';
-import { cleanAiDraft, synthesizeSmartSupportDraft, extractSenderName } from '../../../../extension/src/utils/api-client.ts';
+import { cleanAiDraft, synthesizeSmartSupportDraft, extractSenderName } from '../draft-utils.ts';
 import { getActiveRootPasskey, setCachedRootPasskey, clearCachedRootPasskey, timingSafeEqual } from '../admin-auth.ts';
 
 const __filename = fileURLToPath(import.meta.url);

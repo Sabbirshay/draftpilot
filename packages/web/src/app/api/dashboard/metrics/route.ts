@@ -78,16 +78,18 @@ export async function GET(req: NextRequest) {
     const historyCount = draftsRes.count || 0;
     const usageDraftCount = usageRes.data?.draft_count || 0;
 
-    // Use history count, but if history is 0 and usage has drafts, use usage count
-    const effectiveDraftsCount = Math.max(historyCount, usageDraftCount);
+    // Separate date-range filtered history count from current month's quota usage
+    const isDateFiltered = Boolean(startDate || endDate);
+    const draftsCount = isDateFiltered ? historyCount : (usageDraftCount || historyCount);
 
     return jsonResponse({
-      draftsCount: effectiveDraftsCount,
+      draftsCount,
       historyCount,
       usageDraftCount,
       monthlyLimit,
       macrosCount,
       teamPlan,
+      isDateFiltered,
     });
   } catch (err: any) {
     return jsonResponse({ error: err.message }, { status: 500 });

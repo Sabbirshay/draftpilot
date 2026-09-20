@@ -27,7 +27,7 @@
     "*://mail.google.com/*",
     "*://localhost/*",
     "*://127.0.0.1/*",
-    "https://*.vercel.app/*",
+    "https://draftpilot-web.vercel.app/*",
     "https://*.supabase.co/*",
     "https://openrouter.ai/*"
   ],
@@ -44,7 +44,7 @@
       "matches": [
         "*://localhost/*",
         "*://127.0.0.1/*",
-        "https://*.vercel.app/*"
+        "https://draftpilot-web.vercel.app/*"
       ],
       "js": ["web-handshake.js"],
       "run_at": "document_start"

@@ -69,7 +69,6 @@ let inMemoryFlags: FeatureFlag[] = [...DEFAULT_FLAGS];
 
 async function persistFlagsToStorage(flags: FeatureFlag[]): Promise<void> {
   try {
-    // Attempt saving to platform_settings if table/column exists
     const { data: existing } = await supabaseAdmin
       .from('platform_settings')
       .select('id')
@@ -77,16 +76,24 @@ async function persistFlagsToStorage(flags: FeatureFlag[]): Promise<void> {
       .maybeSingle();
 
     if (existing?.id) {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from('platform_settings')
         .update({
           feature_flags: flags,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabaseAdmin
+        .from('platform_settings')
+        .insert({
+          feature_flags: flags,
+          updated_at: new Date().toISOString(),
+        } as any);
+      if (error) throw error;
     }
   } catch (err) {
-    // Fallback gracefully to memory cache if schema does not include feature_flags column
     console.warn('[feature-flags] Database persistence notice (using in-memory cache):', err);
   }
 }
@@ -182,13 +189,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, flag: newFlag, flags: inMemoryFlags });
     }
 
-    // 4. Edge CDN sync trigger
-    if (body.action === 'sync_cdn') {
+    // 4. Synchronization trigger
+    if (body.action === 'sync_cdn' || body.action === 'sync') {
       await persistFlagsToStorage(inMemoryFlags);
       return NextResponse.json({
         success: true,
         flags: inMemoryFlags,
-        message: 'Feature flags propagated to edge CDN workers (12ms latency).',
+        message: 'Feature flags synchronized to persistent platform settings.',
         timestamp: new Date().toISOString(),
       });
     }
