@@ -90,7 +90,7 @@ export default function GmailSyncManager() {
         <button
           onClick={() =>
             alert(
-              'Extension Ready! Open mail.google.com, click reply on any customer email, and activate DraftPilot in the side panel.'
+              'Extension Ready!\n\n• How to use: Open mail.google.com, click reply on any customer email, and activate DraftPilot in the side panel.\n\n• How to update existing extension: Download the new .zip, extract it, and click the 🔄 Reload icon on chrome://extensions.'
             )
           }
           className="px-4 py-2 rounded-xl bg-bg border border-border hover:border-accent text-xs font-semibold text-text transition-colors cursor-pointer"
