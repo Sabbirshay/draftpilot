@@ -601,7 +601,7 @@ export class ApiClient {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          version: '0.1.0',
+          version: (typeof chrome !== 'undefined' && chrome.runtime?.getManifest?.()?.version) || '0.1.0',
           client: 'draftpilot-extension',
           timestamp: Date.now(),
         }),

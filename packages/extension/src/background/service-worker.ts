@@ -95,3 +95,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage();
   return true; // Keep the message channel open for sendResponse
 });
+
+// Auto-update handler: applies new versions immediately upon detection (Chrome Web Store & enterprise)
+if (chrome.runtime?.onUpdateAvailable) {
+  chrome.runtime.onUpdateAvailable.addListener((details) => {
+    console.log('[DraftPilot] Extension update available:', details.version);
+    // Reload runtime to immediately apply update
+    chrome.runtime.reload();
+  });
+}
+
+// Proactive update check on service worker startup
+if (chrome.runtime?.requestUpdateCheck) {
+  try {
+    chrome.runtime.requestUpdateCheck((status) => {
+      if (status === 'update_available') {
+        chrome.runtime.reload();
+      }
+    });
+  } catch {
+    // Ignore in unsupported environments
+  }
+}
+
