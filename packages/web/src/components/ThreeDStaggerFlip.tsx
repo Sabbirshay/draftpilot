@@ -118,7 +118,7 @@ export function ThreeDStaggerFlip({
       aria-label={text}
     >
       <span className="sr-only">{text}</span>
-      <span className="inline-flex flex-wrap justify-center gap-x-2.5" aria-hidden="true">
+      <span className="inline-flex flex-wrap sm:flex-nowrap justify-center gap-x-2 md:gap-x-2.5" aria-hidden="true">
         {words.map((word, wordIndex) => {
           const secWord = secondaryWords[wordIndex] || word;
           const wordChars = word.split('');

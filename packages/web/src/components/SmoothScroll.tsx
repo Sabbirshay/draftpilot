@@ -13,19 +13,20 @@ export default function SmoothScroll({ children }: { children: React.ReactNode }
     const lenis = new Lenis({
       duration: 1.2,
       easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      touchMultiplier: 2,
+      orientation: 'vertical',
+      smoothWheel: true,
+      wheelMultiplier: 1.1,
+      touchMultiplier: 1.5,
       infinite: false,
+      autoRaf: true,
     });
 
-    function raf(time: number) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-
-    requestAnimationFrame(raf);
+    // Make lenis globally available for anchor scrolling
+    (window as any).lenis = lenis;
 
     return () => {
       lenis.destroy();
+      delete (window as any).lenis;
     };
   }, []);
 

@@ -10,7 +10,7 @@ import ScrollReveal from '@/components/ScrollReveal';
 export default function Home() {
   return (
     <>
-      <ScrollReveal variant="fade-up" duration={0.8}>
+      <ScrollReveal variant="fade-up" duration={0.8} margin="0px">
         <Hero />
       </ScrollReveal>
       <ScrollReveal variant="fade-up" delay={0.1}>

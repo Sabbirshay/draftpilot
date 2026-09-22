@@ -50,9 +50,11 @@ export default function Hero() {
         </div>
 
         {/* Headline */}
-        <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold tracking-tight text-text max-w-4xl mb-6 leading-[1.08]">
-          <ThreeDStaggerFlip text="Support replies in seconds." secondaryText="Support replies in seconds." className="block" />
-          <span className="block text-transparent bg-clip-text bg-gradient-to-r from-text via-text-muted to-accent-light">
+        <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight text-text max-w-5xl mb-6 leading-[1.12]">
+          <span className="block whitespace-normal sm:whitespace-nowrap">
+            <ThreeDStaggerFlip text="Support replies in seconds." secondaryText="Support replies in seconds." className="inline-flex" />
+          </span>
+          <span className="block whitespace-normal sm:whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-text via-text-muted to-accent-light">
             Without leaving your inbox.
           </span>
         </h1>
