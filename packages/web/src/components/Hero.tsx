@@ -8,7 +8,7 @@ import InteractiveDemo from './InteractiveDemo';
 
 export default function Hero() {
   return (
-    <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 overflow-hidden">
+    <section className="relative pt-12 pb-14 md:pt-20 md:pb-20 overflow-hidden">
       {/* Jitter-style Ambient Violet/Cyan Glows */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-accent/20 blur-[130px] rounded-full pointer-events-none -z-10" />
       <div className="absolute top-1/3 left-1/3 w-[300px] h-[200px] bg-cyan/10 blur-[100px] rounded-full pointer-events-none -z-10" />
@@ -52,7 +52,7 @@ export default function Hero() {
         {/* Headline */}
         <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold tracking-tight text-text max-w-4xl mb-6 leading-[1.08]">
           <ThreeDStaggerFlip text="Support replies in seconds." secondaryText="Support replies in seconds." className="block" />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-text via-text-muted to-accent-light">
+          <span className="block text-transparent bg-clip-text bg-gradient-to-r from-text via-text-muted to-accent-light">
             Without leaving your inbox.
           </span>
         </h1>

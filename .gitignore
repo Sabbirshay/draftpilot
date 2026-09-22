@@ -39,6 +39,7 @@ coverage/
 
 # Misc
 *.tgz
+*.tsbuildinfo
 .turbo/
 .tools/
 .agents/

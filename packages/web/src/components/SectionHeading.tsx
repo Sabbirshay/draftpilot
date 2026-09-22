@@ -18,7 +18,7 @@ export default function SectionHeading({
   const alignClass = align === 'center' ? 'text-center items-center' : 'text-left items-start';
   
   return (
-    <div className={`flex flex-col gap-3 mb-14 ${alignClass} ${className}`}>
+    <div className={`flex flex-col gap-3 mb-10 ${alignClass} ${className}`}>
       {tag && (
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-elevated border border-border text-[11px] font-semibold text-accent tracking-wide uppercase">
           <span>{tag}</span>

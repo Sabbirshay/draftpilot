@@ -66,7 +66,7 @@ export default function Features() {
   ];
 
   return (
-    <section id="features" className="py-24 relative overflow-hidden">
+    <section id="features" className="py-16 relative overflow-hidden">
       <div className="container mx-auto px-4">
         <SectionHeading 
           tag="Core Capabilities"

@@ -3,7 +3,7 @@ import SectionHeading from './SectionHeading';
 
 export default function Comparison() {
   return (
-    <section id="comparison" className="py-24 relative overflow-hidden bg-bg-subtle/60">
+    <section id="comparison" className="py-16 relative overflow-hidden bg-bg-subtle/60">
       <div className="container mx-auto px-4">
         <SectionHeading 
           tag="Fair Pricing &amp; Simplicity"

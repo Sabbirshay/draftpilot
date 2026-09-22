@@ -59,7 +59,7 @@ export default function HowItWorks() {
   ];
 
   return (
-    <section id="how-it-works" className="py-24 relative overflow-hidden bg-bg-subtle/50">
+    <section id="how-it-works" className="py-16 relative overflow-hidden bg-bg-subtle/50">
       <div className="container mx-auto px-4">
         <SectionHeading 
           tag="Simple Workflow"

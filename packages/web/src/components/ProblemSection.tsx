@@ -49,7 +49,7 @@ export default function ProblemSection() {
   ];
 
   return (
-    <section className="py-24 relative overflow-hidden">
+    <section className="py-16 relative overflow-hidden">
       <div className="container mx-auto px-4">
         <SectionHeading 
           tag="The Reality Today"

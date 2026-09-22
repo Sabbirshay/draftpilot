@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ConditionalLayout from "@/components/ConditionalLayout";
+import SmoothScroll from "@/components/SmoothScroll";
 import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
@@ -32,7 +33,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="font-sans antialiased min-h-screen flex flex-col bg-bg text-text">
-        <ConditionalLayout>{children}</ConditionalLayout>
+        <SmoothScroll>
+          <ConditionalLayout>{children}</ConditionalLayout>
+        </SmoothScroll>
         <Analytics />
       </body>
     </html>

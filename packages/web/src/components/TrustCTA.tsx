@@ -3,7 +3,7 @@ import Button from './Button';
 
 export default function TrustCTA() {
   return (
-    <section className="py-24 relative overflow-hidden">
+    <section className="py-16 relative overflow-hidden">
       <div className="container mx-auto px-4">
         <div className="max-w-4xl mx-auto rounded-4xl border border-border bg-gradient-to-b from-elevated/90 to-bg-card/90 p-8 md:p-14 text-center shadow-[0_20px_80px_rgba(0,0,0,0.5)] relative overflow-hidden">
           {/* Ambient glow */}
