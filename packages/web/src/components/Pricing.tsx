@@ -9,7 +9,7 @@ export default function Pricing() {
   const [isAnnual, setIsAnnual] = useState(false);
 
   return (
-    <section id="pricing" className="py-16 relative overflow-hidden">
+    <section id="pricing" className="py-10 md:py-12 relative overflow-hidden">
       {/* Ambient background glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-accent/15 blur-[130px] rounded-full pointer-events-none -z-10" />
 
@@ -21,7 +21,7 @@ export default function Pricing() {
         />
 
         {/* Monthly / Annual Cadence Toggle with 20% Savings Callout */}
-        <div className="flex items-center justify-center gap-3 mb-12">
+        <div className="flex items-center justify-center gap-3 mb-8">
           <span className={`text-xs font-semibold ${!isAnnual ? 'text-text' : 'text-text-dim'}`}>
             Monthly Billing
           </span>
@@ -53,7 +53,7 @@ export default function Pricing() {
         </div>
         
         {/* 3 Tiers Grid: Free, Team, Enterprise */}
-        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto mb-16 items-stretch">
+        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto mb-10 items-stretch">
           {/* 1. Free Starter Tier */}
           <div className="rounded-3xl border border-border bg-bg-card/80 p-7 flex flex-col justify-between hover:border-border-hover transition-all">
             <div>

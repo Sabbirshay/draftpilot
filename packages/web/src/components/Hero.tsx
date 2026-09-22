@@ -8,7 +8,7 @@ import InteractiveDemo from './InteractiveDemo';
 
 export default function Hero() {
   return (
-    <section className="relative pt-12 pb-14 md:pt-20 md:pb-20 overflow-hidden">
+    <section className="relative pt-10 pb-8 md:pt-16 md:pb-12 overflow-hidden">
       {/* Jitter-style Ambient Violet/Cyan Glows */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-accent/20 blur-[130px] rounded-full pointer-events-none -z-10" />
       <div className="absolute top-1/3 left-1/3 w-[300px] h-[200px] bg-cyan/10 blur-[100px] rounded-full pointer-events-none -z-10" />
@@ -90,8 +90,8 @@ export default function Hero() {
         <InteractiveDemo />
 
         {/* Architectural Trust & Compliance Bar */}
-        <div className="mt-8 pt-8 border-t border-border/40 w-full max-w-4xl">
-          <p className="text-xs uppercase tracking-widest text-text-dim font-semibold mb-6">
+        <div className="mt-6 pt-6 border-t border-border/40 w-full max-w-4xl">
+          <p className="text-xs uppercase tracking-widest text-text-dim font-semibold mb-4">
             Engineered for privacy, reliability &amp; speed
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
