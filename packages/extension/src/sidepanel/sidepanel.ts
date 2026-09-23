@@ -47,21 +47,46 @@ class SidePanel {
     document.getElementById(viewId)?.classList.remove('hidden');
   }
 
-  private async getGmailTab(): Promise<chrome.tabs.Tab | null> {
+  private isMailUrl(url: string): boolean {
+    return (
+      url.includes('mail.google.com') ||
+      url.includes('outlook.office.com') ||
+      url.includes('outlook.office365.com') ||
+      url.includes('outlook.live.com')
+    );
+  }
+
+  private isOutlookUrl(url: string): boolean {
+    return (
+      url.includes('outlook.office.com') ||
+      url.includes('outlook.office365.com') ||
+      url.includes('outlook.live.com')
+    );
+  }
+
+  private async getMailTab(): Promise<chrome.tabs.Tab | null> {
     try {
       const lastTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (lastTabs[0] && lastTabs[0].url && lastTabs[0].url.includes('mail.google.com')) {
+      if (lastTabs[0] && lastTabs[0].url && this.isMailUrl(lastTabs[0].url)) {
         return lastTabs[0];
       }
 
       const currTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (currTabs[0] && currTabs[0].url && currTabs[0].url.includes('mail.google.com')) {
+      if (currTabs[0] && currTabs[0].url && this.isMailUrl(currTabs[0].url)) {
         return currTabs[0];
       }
 
-      const allGmail = await chrome.tabs.query({ url: '*://mail.google.com/*' });
-      if (allGmail.length > 0) {
-        return allGmail[0];
+      // Search for any open Gmail or Outlook tab
+      const allMail = await chrome.tabs.query({
+        url: [
+          '*://mail.google.com/*',
+          '*://outlook.office.com/*',
+          '*://outlook.office365.com/*',
+          '*://outlook.live.com/*',
+        ],
+      });
+      if (allMail.length > 0) {
+        return allMail[0];
       }
     } catch {
       // Ignore
@@ -223,7 +248,7 @@ class SidePanel {
     // Insert into Gmail Reply
     document.getElementById('insert-btn')?.addEventListener('click', async () => {
       if (!this.currentDraft) return;
-      await this.insertTextIntoGmailTab(this.currentDraft);
+      await this.insertTextIntoMailTab(this.currentDraft);
     });
 
     // Copy to clipboard
@@ -371,7 +396,7 @@ class SidePanel {
             </div>
             <div style="font-size: 11px; color: #9ca3af; line-height: 1.4; margin-bottom: 8px; max-height: 50px; overflow: hidden; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">${escapeHtml(m.content)}</div>
             <button class="btn-use-macro" data-id="${escapeHtml(m.id)}" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 700; border-radius: 8px; background: #7c3aed; color: white; border: none; cursor: pointer; transition: all 0.2s;">
-              ⚡ Insert Macro into Gmail Reply
+              ⚡ Insert Macro into Reply
             </button>
           </div>
         `
@@ -390,10 +415,10 @@ class SidePanel {
               .replace(/{{customer_name}}/g, this.customerName)
               .replace(/\[Customer\]/g, this.customerName);
 
-            target.innerText = '✓ Inserting into Gmail...';
-            await this.insertTextIntoGmailTab(formatted);
-            target.innerText = '✓ Inserted into Gmail Reply!';
-            setTimeout(() => (target.innerText = '⚡ Insert Macro into Gmail Reply'), 2500);
+            target.innerText = '✓ Inserting into email...';
+            await this.insertTextIntoMailTab(formatted);
+            target.innerText = '✓ Inserted into email reply!';
+            setTimeout(() => (target.innerText = '⚡ Insert Macro into Reply'), 2500);
           }
         });
       });
@@ -479,7 +504,7 @@ class SidePanel {
 
   public async pollActiveTabForThread(manual: boolean = false) {
     try {
-      const tab = await this.getGmailTab();
+      const tab = await this.getMailTab();
       if (!tab?.id) return;
 
       // 1. Try messaging content script
@@ -496,17 +521,23 @@ class SidePanel {
               target: { tabId: tab.id },
               func: () => {
                 let text = '';
-                const subject = document.querySelector('h2.hP, h2[data-thread-perm-id]')?.textContent?.trim();
+                // Subject: Gmail + Outlook selectors
+                const subject = document.querySelector(
+                  'h2.hP, h2[data-thread-perm-id], span[role="heading"][aria-level], div[role="heading"][aria-level]'
+                )?.textContent?.trim();
                 if (subject) text += `Subject: ${subject}\n\n`;
 
-                const bodies = document.querySelectorAll('.a3s.aiL, .a3s, .ii.gt, div[data-message-id]');
+                // Bodies: Gmail + Outlook selectors
+                const bodies = document.querySelectorAll(
+                  '.a3s.aiL, .a3s, .ii.gt, div[data-message-id], div[role="document"], div[data-testid="MessageBody"], div.allowTextSelection'
+                );
                 bodies.forEach((b) => {
                   const t = (b as HTMLElement).innerText?.trim();
                   if (t && t.length > 10) text += t + '\n\n';
                 });
 
                 if (!text.trim()) {
-                  const main = document.querySelector('div[role="main"]');
+                  const main = document.querySelector('div[role="main"], div[data-app-section="ConversationContainer"]');
                   if (main) text = (main as HTMLElement).innerText?.slice(0, 1500) || '';
                 }
                 return text.trim();
@@ -528,10 +559,10 @@ class SidePanel {
     }
   }
 
-  private async insertTextIntoGmailTab(textToInsert: string) {
-    const tab = await this.getGmailTab();
+  private async insertTextIntoMailTab(textToInsert: string) {
+    const tab = await this.getMailTab();
     if (!tab?.id) {
-      alert('Please keep your Gmail tab open in Chrome.');
+      alert('Please keep your email tab (Gmail or Outlook) open in Chrome.');
       return;
     }
 
@@ -541,13 +572,13 @@ class SidePanel {
         const btn = document.getElementById('insert-btn') as HTMLButtonElement;
         if (btn) {
           const orig = btn.innerText;
-          btn.innerText = '✓ Inserted into Gmail!';
+          btn.innerText = '✓ Inserted into email!';
           setTimeout(() => (btn.innerText = orig), 2000);
         }
         return;
       }
 
-      // 2. Fallback: Direct scripting insertion into active Gmail editable element
+      // 2. Fallback: Direct scripting insertion into active email compose element
       if (chrome.scripting && tab.id) {
         chrome.scripting.executeScript(
           {
@@ -555,12 +586,20 @@ class SidePanel {
             args: [textToInsert],
             func: (rawText) => {
               const selectors = [
+                // Gmail selectors
                 'div[role="textbox"][contenteditable="true"]',
                 'div[role="textbox"][g_editable="true"]',
                 'div[aria-label*="Message Body"]',
                 'div[aria-label*="Reply"]',
                 'div.Am.Al.editable',
                 'div.editable[contenteditable="true"]',
+                // Outlook selectors
+                'div[role="textbox"][aria-label="Message body"]',
+                'div[role="textbox"][aria-multiline="true"]',
+                'div[data-testid="TextEditor"]',
+                'div.dFCbN[contenteditable="true"]',
+                'div.elementToProof[contenteditable="true"]',
+                // Generic fallback
                 'div[role="textbox"]',
               ];
 
@@ -606,9 +645,9 @@ class SidePanel {
             if (btn) {
               const orig = btn.innerText;
               if (results && results[0] && results[0].result) {
-                btn.innerText = '✓ Inserted into Gmail!';
+                btn.innerText = '✓ Inserted into email!';
               } else {
-                btn.innerText = '⚠️ Click Reply in Gmail first';
+                btn.innerText = '⚠️ Click Reply in your email first';
               }
               setTimeout(() => (btn.innerText = orig), 2500);
             }

@@ -142,7 +142,7 @@ export default function GmailSyncManager() {
     );
     descriptionEl = (
       <span>
-        DraftPilot extension is not detected in your browser. Install it to enable 1-click AI drafts in Gmail.
+        DraftPilot extension is not detected in your browser. Install it to enable 1-click AI drafts in Gmail &amp; Outlook.
       </span>
     );
     actionEl = (
@@ -186,7 +186,7 @@ export default function GmailSyncManager() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-text">Gmail Chrome Extension Sync</h3>
+              <h3 className="text-base font-bold text-text">Inbox Extension Sync (Gmail &amp; Outlook)</h3>
               {badgeEl}
             </div>
             <p className="text-xs text-text-muted mt-0.5">

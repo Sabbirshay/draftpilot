@@ -75,7 +75,7 @@ export default function Pricing() {
               <ul className="space-y-3 mb-8">
                 <FeatureItem>1 user seat</FeatureItem>
                 <FeatureItem>50 AI drafts / month</FeatureItem>
-                <FeatureItem>Gmail integration</FeatureItem>
+                <FeatureItem>Gmail &amp; Outlook integration</FeatureItem>
                 <FeatureItem>Up to 5 custom macros</FeatureItem>
                 <FeatureItem>Client-side PII scrubbing (8 built-in)</FeatureItem>
                 <FeatureItem>Community &amp; email support</FeatureItem>

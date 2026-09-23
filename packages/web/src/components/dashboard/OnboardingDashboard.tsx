@@ -263,7 +263,7 @@ export default function OnboardingDashboard({
     {
       id: 'extension_installed' as keyof OnboardingState,
       title: '1. Install Extension',
-      description: 'Add DraftPilot extension to Chrome for inline Gmail drafting',
+      description: 'Add DraftPilot extension to Chrome for inline Gmail & Outlook drafting',
       icon: '🧩',
       badgeName: 'Extension Pioneer',
       badgeIcon: '🧩',

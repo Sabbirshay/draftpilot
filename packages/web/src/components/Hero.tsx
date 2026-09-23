@@ -81,7 +81,7 @@ export default function Hero() {
         <p className="text-xs text-text-dim flex items-center justify-center gap-2 mb-10">
           <span>✓ 100% Free tier available</span>
           <span>•</span>
-          <span>✓ Works with Gmail</span>
+          <span>✓ Works with Gmail &amp; Outlook</span>
           <span>•</span>
           <span>✓ Client-side PII scrubbing</span>
         </p>

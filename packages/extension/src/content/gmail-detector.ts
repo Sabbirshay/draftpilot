@@ -283,3 +283,5 @@ class GmailDetector {
 
 // Initialize on page load
 new GmailDetector();
+
+export {};

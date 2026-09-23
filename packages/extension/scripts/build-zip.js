@@ -25,6 +25,7 @@ const requiredFiles = [
   'manifest.json',
   'web-handshake.js',
   'gmail-detector.js',
+  'outlook-detector.js',
   'service-worker.js',
   'icons',
 ];

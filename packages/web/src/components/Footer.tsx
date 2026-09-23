@@ -37,7 +37,7 @@ export default function Footer() {
           <div className="space-y-2.5">
             <p className="font-bold text-text uppercase tracking-wider text-[10px]">Integrations</p>
             <ul className="space-y-2 text-text-dim">
-              <li className="text-text">Gmail (Live)</li>
+              <li className="text-text">Gmail &amp; Outlook (Live)</li>
               <li>Help Scout (v1.5)</li>
               <li>Zendesk (v1.5)</li>
               <li>Freshdesk (v1.5)</li>

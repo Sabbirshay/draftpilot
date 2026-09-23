@@ -30,7 +30,7 @@ export default function TrustCTA() {
             </Button>
           </div>
 
-          <p className="text-xs text-text-dim">Takes 60 seconds • No credit card required • Works on Gmail</p>
+          <p className="text-xs text-text-dim">Takes 60 seconds • No credit card required • Works on Gmail &amp; Outlook</p>
         </div>
       </div>
     </section>

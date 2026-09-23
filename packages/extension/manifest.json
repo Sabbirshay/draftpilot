@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DraftPilot — AI Support Reply Assistant",
-  "version": "0.1.0",
-  "description": "AI-drafted replies inside the inbox you already use. Built for small support teams.",
+  "version": "0.1.1",
+  "description": "AI-drafted replies inside the inbox you already use. Built for small support teams. Works with Gmail and Outlook.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -25,6 +25,9 @@
   ],
   "host_permissions": [
     "*://mail.google.com/*",
+    "*://outlook.office.com/*",
+    "*://outlook.office365.com/*",
+    "*://outlook.live.com/*",
     "*://localhost/*",
     "*://127.0.0.1/*",
     "https://draftpilot-web.vercel.app/*",
@@ -38,6 +41,15 @@
     {
       "matches": ["*://mail.google.com/*"],
       "js": ["gmail-detector.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://outlook.office.com/*",
+        "*://outlook.office365.com/*",
+        "*://outlook.live.com/*"
+      ],
+      "js": ["outlook-detector.js"],
       "run_at": "document_idle"
     },
     {
