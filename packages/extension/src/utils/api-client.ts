@@ -375,6 +375,11 @@ export class ApiClient {
     }
   }
 
+  async getWebUrl(): Promise<string> {
+    await this.initBaseUrl();
+    return this.webUrl;
+  }
+
   private async getToken(): Promise<string | null> {
     const data = await chrome.storage.local.get(['token']);
     return data.token || null;

@@ -35,6 +35,13 @@ export default function AuthCallbackPage() {
           setStatus('Setting up your account...');
           const result = await provisionUser(retrySession.access_token);
           
+          localStorage.setItem('draftpilot_token', retrySession.access_token);
+          if (result?.user) {
+            localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
+          }
+          window.postMessage({ type: 'DRAFTPILOT_AUTH_CHANGED' }, '*');
+
+          setStatus('Success! Redirecting to your dashboard...');
           window.location.href = '/dashboard';
           return;
         }
@@ -45,7 +52,10 @@ export default function AuthCallbackPage() {
 
         // Store in localStorage for backward compat
         localStorage.setItem('draftpilot_token', session.access_token);
-        localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
+        if (result?.user) {
+          localStorage.setItem('draftpilot_user', JSON.stringify(result.user));
+        }
+        window.postMessage({ type: 'DRAFTPILOT_AUTH_CHANGED' }, '*');
 
         setStatus('Success! Redirecting to your dashboard...');
         window.location.href = '/dashboard';

@@ -24,6 +24,7 @@ class SidePanel {
   async init() {
     this.attachEventListeners();
     await this.checkAuth();
+    this.listenForStorageAuth();
     this.listenForThread();
     this.startActivePolling();
   }
@@ -120,6 +121,20 @@ class SidePanel {
         this.showError(err.message);
       }
     });
+
+    // Google OAuth Handler
+    const handleGoogleAuth = async () => {
+      this.hideError();
+      try {
+        const webUrl = await apiClient.getWebUrl();
+        chrome.tabs.create({ url: `${webUrl}/login` });
+      } catch {
+        chrome.tabs.create({ url: 'https://draftpilot-web.vercel.app/login' });
+      }
+    };
+
+    document.getElementById('google-login-btn')?.addEventListener('click', handleGoogleAuth);
+    document.getElementById('google-reg-btn')?.addEventListener('click', handleGoogleAuth);
 
     document.getElementById('show-register')?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -662,6 +677,19 @@ class SidePanel {
     this.pollInterval = setInterval(() => {
       this.pollActiveTabForThread();
     }, 2000);
+  }
+
+  private listenForStorageAuth() {
+    // Listen for auth token synchronization (e.g. from Google OAuth web handshake)
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && (changes.token || changes.user)) {
+        if (changes.token?.newValue) {
+          this.checkAuth();
+        } else if (changes.token && !changes.token.newValue) {
+          this.showView('login-view');
+        }
+      }
+    });
   }
 
   private listenForThread() {
