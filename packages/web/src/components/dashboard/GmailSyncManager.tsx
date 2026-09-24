@@ -109,7 +109,7 @@ export default function GmailSyncManager() {
     );
     descriptionEl = (
       <span>
-        Extension v{extVersion} detected. Please update to v0.1.0 for latest features and security updates.
+        Extension v{extVersion} detected. Please update to latest v0.1.2 (adds Google OAuth and Outlook support).
       </span>
     );
     actionEl = (
