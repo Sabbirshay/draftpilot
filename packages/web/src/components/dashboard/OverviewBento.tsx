@@ -429,9 +429,6 @@ export default function OverviewBento({ dateRange, onNavigateToMacros }: Overvie
               <p className="text-[11px] text-text-dim">Ask conversational questions about your team support telemetry</p>
             </div>
           </div>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-bg text-text-dim border border-border font-mono">
-            GPT-4o Mini &amp; Llama 3.1
-          </span>
         </div>
 
         {/* Interactive Query Input */}
